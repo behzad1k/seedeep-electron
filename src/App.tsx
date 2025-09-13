@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   ThemeProvider,
   createTheme,
@@ -11,9 +11,6 @@ import {
   ListItemIcon,
   ListItemText,
   Typography,
-  Grid,
-  Card,
-  CardContent,
   IconButton,
   Switch,
   FormControlLabel,
@@ -22,7 +19,9 @@ import {
   Divider,
   ToggleButton,
   ToggleButtonGroup,
-  Tooltip,
+  Dialog,
+  DialogContent,
+  Button,
 } from '@mui/material';
 import {
   Videocam,
@@ -37,13 +36,100 @@ import {
   Analytics,
   GridView,
 } from '@mui/icons-material';
+import { ModelsSidebar } from './components';
+import {DetectionModelKey} from "./types/camera";
 
 interface Camera {
   id: number;
   name: string;
   status: 'online' | 'offline' | 'recording';
   location: string;
+  detectionModels?: {
+    ppeDetection: boolean;
+    personDetection: boolean;
+    vehicleDetection: boolean;
+    fireDetection: boolean;
+    facemaskDetection: boolean;
+  };
 }
+
+interface AddCameraProps {
+  onClose: () => void;
+}
+
+// AddCamera Component (inline for now)
+const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    location: '',
+    ipAddress: '',
+    port: '554',
+  });
+
+  const handleSubmit = () => {
+    console.log('Camera data:', formData);
+    alert('Camera added successfully!');
+    onClose();
+  };
+
+  return (
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h4" gutterBottom>
+        Add New Camera
+      </Typography>
+
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Basic Information
+        </Typography>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
+          <input
+            type="text"
+            placeholder="Camera Name"
+            value={formData.name}
+            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+            style={{ padding: '12px', borderRadius: '4px', border: '1px solid #ccc' }}
+          />
+          <input
+            type="text"
+            placeholder="Location"
+            value={formData.location}
+            onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+            style={{ padding: '12px', borderRadius: '4px', border: '1px solid #ccc' }}
+          />
+          <input
+            type="text"
+            placeholder="IP Address"
+            value={formData.ipAddress}
+            onChange={(e) => setFormData(prev => ({ ...prev, ipAddress: e.target.value }))}
+            style={{ padding: '12px', borderRadius: '4px', border: '1px solid #ccc' }}
+          />
+          <input
+            type="text"
+            placeholder="Port"
+            value={formData.port}
+            onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value }))}
+            style={{ padding: '12px', borderRadius: '4px', border: '1px solid #ccc' }}
+          />
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+          <Button variant="outlined" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSubmit}
+            disabled={!formData.name || !formData.location}
+          >
+            Add Camera
+          </Button>
+        </Box>
+      </Paper>
+    </Box>
+  );
+};
 
 const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState(false);
@@ -51,24 +137,123 @@ const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [gridSize, setGridSize] = useState<'2x2' | '3x3' | '4x4' | '5x5'>('3x3');
+  const [addCameraOpen, setAddCameraOpen] = useState(false);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null);
 
-  // Mock camera data - replace with API data later
-  const [cameras] = useState<Camera[]>([
-    { id: 1, name: 'Front Entrance', status: 'online', location: 'Building A' },
-    { id: 2, name: 'Parking Lot', status: 'recording', location: 'Building A' },
-    { id: 3, name: 'Back Exit', status: 'offline', location: 'Building B' },
-    { id: 4, name: 'Lobby', status: 'online', location: 'Building A' },
-    { id: 5, name: 'Warehouse', status: 'recording', location: 'Building C' },
-    { id: 6, name: 'Server Room', status: 'online', location: 'Building B' },
-    { id: 7, name: 'Reception', status: 'online', location: 'Building A' },
-    { id: 8, name: 'Loading Dock', status: 'offline', location: 'Building C' },
+  // Mock camera data
+  const [cameras, setCameras] = useState<Camera[]>([
+    {
+      id: 1,
+      name: 'Front Entrance',
+      status: 'online',
+      location: 'Building A',
+      detectionModels: {
+        ppeDetection: false,
+        personDetection: true,
+        vehicleDetection: false,
+        fireDetection: false,
+        facemaskDetection: false,
+      }
+    },
+    {
+      id: 2,
+      name: 'Parking Lot',
+      status: 'recording',
+      location: 'Building A',
+      detectionModels: {
+        ppeDetection: false,
+        personDetection: false,
+        vehicleDetection: true,
+        fireDetection: false,
+        facemaskDetection: false,
+      }
+    },
+    {
+      id: 3,
+      name: 'Back Exit',
+      status: 'offline',
+      location: 'Building B',
+      detectionModels: {
+        ppeDetection: false,
+        personDetection: false,
+        vehicleDetection: false,
+        fireDetection: false,
+        facemaskDetection: false,
+      }
+    },
+    {
+      id: 4,
+      name: 'Lobby',
+      status: 'online',
+      location: 'Building A',
+      detectionModels: {
+        ppeDetection: false,
+        personDetection: true,
+        vehicleDetection: false,
+        fireDetection: false,
+        facemaskDetection: true,
+      }
+    },
+    {
+      id: 5,
+      name: 'Warehouse',
+      status: 'recording',
+      location: 'Building C',
+      detectionModels: {
+        ppeDetection: true,
+        personDetection: true,
+        vehicleDetection: false,
+        fireDetection: true,
+        facemaskDetection: false,
+      }
+    },
+    {
+      id: 6,
+      name: 'Server Room',
+      status: 'online',
+      location: 'Building B',
+      detectionModels: {
+        ppeDetection: false,
+        personDetection: true,
+        vehicleDetection: false,
+        fireDetection: true,
+        facemaskDetection: false,
+      }
+    },
+    {
+      id: 7,
+      name: 'Reception',
+      status: 'online',
+      location: 'Building A',
+      detectionModels: {
+        ppeDetection: false,
+        personDetection: true,
+        vehicleDetection: false,
+        fireDetection: false,
+        facemaskDetection: true,
+      }
+    },
+    {
+      id: 8,
+      name: 'Loading Dock',
+      status: 'offline',
+      location: 'Building C',
+      detectionModels: {
+        ppeDetection: true,
+        personDetection: true,
+        vehicleDetection: true,
+        fireDetection: false,
+        facemaskDetection: false,
+      }
+    },
   ]);
 
   const theme = createTheme({
     palette: {
       mode: darkMode ? 'dark' : 'light',
       primary: {
-        main: '#2e7d32', // Green color
+        main: '#2e7d32',
         dark: '#1b5e20',
         light: '#4caf50',
       },
@@ -91,7 +276,6 @@ const App: React.FC = () => {
     { id: 'alerts', label: 'Alerts', icon: <Notifications /> },
     { id: 'analytics', label: 'Analytics', icon: <Analytics /> },
     { id: 'settings', label: 'Settings', icon: <Settings /> },
-    { id: 'add-camera', label: 'Add Camera', icon: <Add /> },
     { id: 'services', label: 'Services', icon: <Build /> },
   ];
 
@@ -110,22 +294,54 @@ const App: React.FC = () => {
     return cols * cols;
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'online': return 'success';
-      case 'recording': return 'warning';
-      case 'offline': return 'error';
-      default: return 'default';
-    }
+  const handleCameraClick = (camera: Camera) => {
+    setSelectedCamera(camera);
+    setRightSidebarOpen(true);
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'online': return 'Online';
-      case 'recording': return 'Recording';
-      case 'offline': return 'Offline';
-      default: return 'Unknown';
-    }
+  const handleDetectionModelChange = (model: DetectionModelKey) => {
+    if (!selectedCamera) return;
+
+    setCameras(prev => prev.map(camera => {
+      if (camera.id === selectedCamera.id) {
+        const currentModels = camera.detectionModels || {
+          ppeDetection: false,
+          personDetection: false,
+          vehicleDetection: false,
+          fireDetection: false,
+          facemaskDetection: false,
+        };
+
+        return {
+          ...camera,
+          detectionModels: {
+            ...currentModels,
+            [model]: !currentModels[model]
+          }
+        };
+      }
+      return camera;
+    }));
+
+    // Update selected camera state as well
+    setSelectedCamera(prev => {
+      if (!prev) return null;
+      const currentModels = prev.detectionModels || {
+        ppeDetection: false,
+        personDetection: false,
+        vehicleDetection: false,
+        fireDetection: false,
+        facemaskDetection: false,
+      };
+
+      return {
+        ...prev,
+        detectionModels: {
+          ...currentModels,
+          [model]: !currentModels[model]
+        }
+      };
+    });
   };
 
   const drawerWidth = sidebarOpen || sidebarHovered ? 240 : 60;
@@ -134,8 +350,6 @@ const App: React.FC = () => {
     const columns = getGridColumns();
     const maxCameras = getMaxCameras();
     const displayCameras = cameras.slice(0, maxCameras);
-
-    // Fill empty slots if we have fewer cameras than grid spaces
     const emptySlotsCount = maxCameras - displayCameras.length;
     const emptySlots = Array(emptySlotsCount).fill(null);
 
@@ -175,7 +389,7 @@ const App: React.FC = () => {
                   transform: 'scale(1.02)',
                 },
               }}
-              className="camera-card"
+              onClick={() => handleCameraClick(camera)}
             >
               {/* Channel Number Label */}
               <Box
@@ -229,11 +443,6 @@ const App: React.FC = () => {
                   alignItems: 'center',
                   justifyContent: 'center',
                   backgroundColor: camera.status === 'offline' ? '#333' : '#1a1a1a',
-                  backgroundImage: camera.status !== 'offline'
-                    ? 'linear-gradient(45deg, #1a1a1a 25%, transparent 25%), linear-gradient(-45deg, #1a1a1a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1a1a1a 75%), linear-gradient(-45deg, transparent 75%, #1a1a1a 75%)'
-                    : 'none',
-                  backgroundSize: '20px 20px',
-                  backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
                 }}
               >
                 {camera.status === 'offline' ? (
@@ -262,11 +471,10 @@ const App: React.FC = () => {
                   p: 1,
                   transform: 'translateY(100%)',
                   transition: 'transform 0.2s ease',
-                  '.camera-card:hover &': {
+                  '&:hover': {
                     transform: 'translateY(0)',
                   },
                 }}
-                className="camera-info"
               >
                 <Typography variant="caption" display="block" fontWeight="bold">
                   {camera.name}
@@ -297,6 +505,7 @@ const App: React.FC = () => {
                   backgroundColor: darkMode ? '#1a1a1a' : '#f5f5f5',
                 },
               }}
+              onClick={() => setAddCameraOpen(true)}
             >
               <Box sx={{ textAlign: 'center' }}>
                 <Add sx={{ fontSize: 30, mb: 1 }} />
@@ -349,13 +558,6 @@ const App: React.FC = () => {
               }
               label="Dark Mode"
             />
-          </Box>
-        );
-      case 'add-camera':
-        return (
-          <Box sx={{ p: 3 }}>
-            <Typography variant="h5" gutterBottom>Add New Camera</Typography>
-            <Typography variant="body1">Camera setup wizard will be here</Typography>
           </Box>
         );
       case 'services':
@@ -501,6 +703,8 @@ const App: React.FC = () => {
             height: '100vh',
             overflow: 'auto',
             backgroundColor: 'background.default',
+            marginRight: rightSidebarOpen ? '320px' : 0,
+            transition: 'margin-right 0.3s ease',
           }}
         >
           {/* Header */}
@@ -521,6 +725,23 @@ const App: React.FC = () => {
 
             {activeTab === 'cameras' && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                {/* Add Camera Button */}
+                <Button
+                  variant="contained"
+                  startIcon={<Add />}
+                  onClick={() => setAddCameraOpen(true)}
+                  sx={{
+                    backgroundColor: 'primary.main',
+                    '&:hover': {
+                      backgroundColor: 'primary.dark',
+                    },
+                  }}
+                >
+                  Add Camera
+                </Button>
+
+                <Divider orientation="vertical" flexItem />
+
                 {/* Grid Size Selector */}
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <GridView sx={{ fontSize: 20 }} />
@@ -569,6 +790,34 @@ const App: React.FC = () => {
           </Box>
         </Box>
       </Box>
+
+      {/* Models Sidebar */}
+      <ModelsSidebar
+        open={rightSidebarOpen}
+        onClose={() => setRightSidebarOpen(false)}
+        selectedCamera={selectedCamera}
+        cameras={cameras}
+        darkMode={darkMode}
+        onDetectionModelChange={handleDetectionModelChange}
+      />
+
+      {/* Add Camera Modal */}
+      <Dialog
+        open={addCameraOpen}
+        onClose={() => setAddCameraOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            minHeight: '80vh',
+            maxHeight: '90vh',
+          }
+        }}
+      >
+        <DialogContent sx={{ p: 0 }}>
+          <AddCamera onClose={() => setAddCameraOpen(false)} />
+        </DialogContent>
+      </Dialog>
     </ThemeProvider>
   );
 };
