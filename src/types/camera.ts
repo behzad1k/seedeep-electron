@@ -35,7 +35,7 @@ export interface Camera {
     personDetection: boolean;
     vehicleDetection: boolean;
     fireDetection: boolean;
-    facemaskDetection: boolean;
+    weaponDetection: boolean;
   };
 
   // Location
@@ -83,7 +83,7 @@ export interface CameraFormData {
 
 export type GridSize = '2x2' | '3x3' | '4x4' | '5x5';
 
-export type DetectionModelKey = 'ppeDetection' | 'personDetection' | 'vehicleDetection' | 'fireDetection' | 'facemaskDetection';
+export type DetectionModelKey = 'ppeDetection' | 'personDetection' | 'vehicleDetection' | 'fireDetection' | 'weaponDetection';
 
 export interface ConnectionTestResult {
   success: boolean;

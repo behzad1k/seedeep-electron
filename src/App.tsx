@@ -37,6 +37,7 @@ import {
   GridView,
 } from '@mui/icons-material';
 import { ModelsSidebar } from './components';
+import FullScreenCameraView from './components/FullScreenCameraView';
 import {DetectionModelKey} from "./types/camera";
 
 interface Camera {
@@ -49,7 +50,7 @@ interface Camera {
     personDetection: boolean;
     vehicleDetection: boolean;
     fireDetection: boolean;
-    facemaskDetection: boolean;
+    weaponDetection: boolean;
   };
 }
 
@@ -140,6 +141,7 @@ const App: React.FC = () => {
   const [addCameraOpen, setAddCameraOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null);
+  const [fullScreenCamera, setFullScreenCamera] = useState<Camera | null>(null);
 
   // Mock camera data
   const [cameras, setCameras] = useState<Camera[]>([
@@ -153,7 +155,7 @@ const App: React.FC = () => {
         personDetection: true,
         vehicleDetection: false,
         fireDetection: false,
-        facemaskDetection: false,
+        weaponDetection: false,
       }
     },
     {
@@ -166,7 +168,7 @@ const App: React.FC = () => {
         personDetection: false,
         vehicleDetection: true,
         fireDetection: false,
-        facemaskDetection: false,
+        weaponDetection: false,
       }
     },
     {
@@ -179,7 +181,7 @@ const App: React.FC = () => {
         personDetection: false,
         vehicleDetection: false,
         fireDetection: false,
-        facemaskDetection: false,
+        weaponDetection: false,
       }
     },
     {
@@ -192,7 +194,7 @@ const App: React.FC = () => {
         personDetection: true,
         vehicleDetection: false,
         fireDetection: false,
-        facemaskDetection: true,
+        weaponDetection: true,
       }
     },
     {
@@ -205,7 +207,7 @@ const App: React.FC = () => {
         personDetection: true,
         vehicleDetection: false,
         fireDetection: true,
-        facemaskDetection: false,
+        weaponDetection: false,
       }
     },
     {
@@ -218,7 +220,7 @@ const App: React.FC = () => {
         personDetection: true,
         vehicleDetection: false,
         fireDetection: true,
-        facemaskDetection: false,
+        weaponDetection: false,
       }
     },
     {
@@ -231,7 +233,7 @@ const App: React.FC = () => {
         personDetection: true,
         vehicleDetection: false,
         fireDetection: false,
-        facemaskDetection: true,
+        weaponDetection: true,
       }
     },
     {
@@ -244,7 +246,7 @@ const App: React.FC = () => {
         personDetection: true,
         vehicleDetection: true,
         fireDetection: false,
-        facemaskDetection: false,
+        weaponDetection: false,
       }
     },
   ]);
@@ -297,6 +299,11 @@ const App: React.FC = () => {
   const handleCameraClick = (camera: Camera) => {
     setSelectedCamera(camera);
     setRightSidebarOpen(true);
+    setFullScreenCamera(camera);
+  };
+
+  const handleExitFullscreen = () => {
+    setFullScreenCamera(null);
   };
 
   const handleDetectionModelChange = (model: DetectionModelKey) => {
@@ -309,7 +316,7 @@ const App: React.FC = () => {
           personDetection: false,
           vehicleDetection: false,
           fireDetection: false,
-          facemaskDetection: false,
+          weaponDetection: false,
         };
 
         return {
@@ -323,7 +330,6 @@ const App: React.FC = () => {
       return camera;
     }));
 
-    // Update selected camera state as well
     setSelectedCamera(prev => {
       if (!prev) return null;
       const currentModels = prev.detectionModels || {
@@ -331,7 +337,26 @@ const App: React.FC = () => {
         personDetection: false,
         vehicleDetection: false,
         fireDetection: false,
-        facemaskDetection: false,
+        weaponDetection: false,
+      };
+
+      return {
+        ...prev,
+        detectionModels: {
+          ...currentModels,
+          [model]: !currentModels[model]
+        }
+      };
+    });
+
+    setFullScreenCamera(prev => {
+      if (!prev || prev.id !== selectedCamera.id) return prev;
+      const currentModels = prev.detectionModels || {
+        ppeDetection: false,
+        personDetection: false,
+        vehicleDetection: false,
+        fireDetection: false,
+        weaponDetection: false,
       };
 
       return {
@@ -391,7 +416,6 @@ const App: React.FC = () => {
               }}
               onClick={() => handleCameraClick(camera)}
             >
-              {/* Channel Number Label */}
               <Box
                 sx={{
                   position: 'absolute',
@@ -410,7 +434,6 @@ const App: React.FC = () => {
                 CH{index + 1}
               </Box>
 
-              {/* Status Indicator */}
               <Box
                 sx={{
                   position: 'absolute',
@@ -434,7 +457,6 @@ const App: React.FC = () => {
                 }}
               />
 
-              {/* Camera Feed Area */}
               <Box
                 sx={{
                   width: '100%',
@@ -459,7 +481,6 @@ const App: React.FC = () => {
                 )}
               </Box>
 
-              {/* Camera Info Overlay */}
               <Box
                 sx={{
                   position: 'absolute',
@@ -486,7 +507,6 @@ const App: React.FC = () => {
             </Box>
           ))}
 
-          {/* Empty Slots */}
           {emptySlots.map((_, index) => (
             <Box
               key={`empty-${index}`}
@@ -521,6 +541,17 @@ const App: React.FC = () => {
   };
 
   const renderContent = () => {
+    if (fullScreenCamera && activeTab === 'cameras') {
+      return (
+        <FullScreenCameraView
+          camera={fullScreenCamera}
+          onBack={handleExitFullscreen}
+          darkMode={darkMode}
+          channelNumber={cameras.findIndex(c => c.id === fullScreenCamera.id) + 1}
+        />
+      );
+    }
+
     switch (activeTab) {
       case 'cameras':
         return renderCameraGrid();
@@ -576,8 +607,6 @@ const App: React.FC = () => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ display: 'flex', height: '100vh' }}>
-
-        {/* Collapsible Sidebar */}
         <Drawer
           variant="permanent"
           onMouseEnter={() => setSidebarHovered(true)}
@@ -596,7 +625,6 @@ const App: React.FC = () => {
             },
           }}
         >
-          {/* Sidebar Header */}
           <Box
             sx={{
               p: 2,
@@ -620,7 +648,6 @@ const App: React.FC = () => {
 
           <Divider />
 
-          {/* Navigation Items */}
           <List sx={{ flexGrow: 1, pt: 1 }}>
             {sidebarItems.map((item) => (
               <ListItem key={item.id} disablePadding>
@@ -663,7 +690,6 @@ const App: React.FC = () => {
             ))}
           </List>
 
-          {/* Theme Toggle at Bottom */}
           <Box sx={{ p: 2 }}>
             <ListItemButton
               onClick={() => setDarkMode(!darkMode)}
@@ -695,7 +721,6 @@ const App: React.FC = () => {
           </Box>
         </Drawer>
 
-        {/* Main Content Area */}
         <Box
           component="main"
           sx={{
@@ -707,91 +732,87 @@ const App: React.FC = () => {
             transition: 'margin-right 0.3s ease',
           }}
         >
-          {/* Header */}
-          <Paper
-            elevation={1}
-            sx={{
-              p: 2,
-              mb: 0,
-              borderRadius: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <Typography variant="h5" fontWeight="bold">
-              {sidebarItems.find(item => item.id === activeTab)?.label || 'Dashboard'}
-            </Typography>
+          {!fullScreenCamera && (
+            <Paper
+              elevation={1}
+              sx={{
+                p: 2,
+                mb: 0,
+                borderRadius: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <Typography variant="h5" fontWeight="bold">
+                {sidebarItems.find(item => item.id === activeTab)?.label || 'Dashboard'}
+              </Typography>
 
-            {activeTab === 'cameras' && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                {/* Add Camera Button */}
-                <Button
-                  variant="contained"
-                  startIcon={<Add />}
-                  onClick={() => setAddCameraOpen(true)}
-                  sx={{
-                    backgroundColor: 'primary.main',
-                    '&:hover': {
-                      backgroundColor: 'primary.dark',
-                    },
-                  }}
-                >
-                  Add Camera
-                </Button>
-
-                <Divider orientation="vertical" flexItem />
-
-                {/* Grid Size Selector */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <GridView sx={{ fontSize: 20 }} />
-                  <ToggleButtonGroup
-                    value={gridSize}
-                    exclusive
-                    onChange={(e, newGridSize) => newGridSize && setGridSize(newGridSize)}
-                    size="small"
+              {activeTab === 'cameras' && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Button
+                    variant="contained"
+                    startIcon={<Add />}
+                    onClick={() => setAddCameraOpen(true)}
+                    sx={{
+                      backgroundColor: 'primary.main',
+                      '&:hover': {
+                        backgroundColor: 'primary.dark',
+                      },
+                    }}
                   >
-                    <ToggleButton value="2x2">2×2</ToggleButton>
-                    <ToggleButton value="3x3">3×3</ToggleButton>
-                    <ToggleButton value="4x4">4×4</ToggleButton>
-                    <ToggleButton value="5x5">5×5</ToggleButton>
-                  </ToggleButtonGroup>
+                    Add Camera
+                  </Button>
+
+                  <Divider orientation="vertical" flexItem />
+
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <GridView sx={{ fontSize: 20 }} />
+                    <ToggleButtonGroup
+                      value={gridSize}
+                      exclusive
+                      onChange={(e, newGridSize) => newGridSize && setGridSize(newGridSize)}
+                      size="small"
+                    >
+                      <ToggleButton value="2x2">2×2</ToggleButton>
+                      <ToggleButton value="3x3">3×3</ToggleButton>
+                      <ToggleButton value="4x4">4×4</ToggleButton>
+                      <ToggleButton value="5x5">5×5</ToggleButton>
+                    </ToggleButtonGroup>
+                  </Box>
+
+                  <Divider orientation="vertical" flexItem />
+
+                  <Chip
+                    label={`${cameras.filter(c => c.status === 'online').length} Online`}
+                    color="success"
+                    size="small"
+                  />
+                  <Chip
+                    label={`${cameras.filter(c => c.status === 'recording').length} Recording`}
+                    sx={{
+                      backgroundColor: '#ff9800',
+                      color: 'white',
+                      '&:hover': { backgroundColor: '#f57c00' }
+                    }}
+                    size="small"
+                  />
+                  <Chip
+                    label={`${cameras.filter(c => c.status === 'offline').length} Offline`}
+                    color="error"
+                    size="small"
+                  />
                 </Box>
+              )}
+            </Paper>
+          )}
 
-                <Divider orientation="vertical" flexItem />
-
-                {/* Status Chips */}
-                <Chip
-                  label={`${cameras.filter(c => c.status === 'online').length} Online`}
-                  color="success"
-                  size="small"
-                />
-                <Chip
-                  label={`${cameras.filter(c => c.status === 'recording').length} Recording`}
-                  sx={{
-                    backgroundColor: '#ff9800',
-                    color: 'white',
-                    '&:hover': { backgroundColor: '#f57c00' }
-                  }}
-                  size="small"
-                />
-                <Chip
-                  label={`${cameras.filter(c => c.status === 'offline').length} Offline`}
-                  color="error"
-                  size="small"
-                />
-              </Box>
-            )}
-          </Paper>
-
-          {/* Content Area */}
-          <Box sx={{ height: 'calc(100vh - 80px)', overflow: 'auto' }}>
+          <Box sx={{ height: fullScreenCamera ? '100vh' : 'calc(100vh - 80px)', overflow: 'auto' }}>
             {renderContent()}
           </Box>
         </Box>
       </Box>
 
-      {/* Models Sidebar */}
       <ModelsSidebar
         open={rightSidebarOpen}
         onClose={() => setRightSidebarOpen(false)}
@@ -801,7 +822,6 @@ const App: React.FC = () => {
         onDetectionModelChange={handleDetectionModelChange}
       />
 
-      {/* Add Camera Modal */}
       <Dialog
         open={addCameraOpen}
         onClose={() => setAddCameraOpen(false)}
