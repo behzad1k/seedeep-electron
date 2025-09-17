@@ -760,8 +760,7 @@ const App: React.FC = () => {
                         backgroundColor: 'primary.dark',
                       },
                     }}
-                  >
-                    Add Camera
+                  >add camera
                   </Button>
 
                   <Divider orientation="vertical" flexItem />
