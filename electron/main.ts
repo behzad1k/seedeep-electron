@@ -4,6 +4,7 @@ import * as path from 'path';
 const isDevelopment = process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true' || !app.isPackaged;
 
 function createWindow(): void {
+  console.log(path.join(__dirname, '/preload.js'));
   // Create the browser window
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -11,7 +12,7 @@ function createWindow(): void {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, '/preload.js'),
       webSecurity: false, // Disable for development to avoid CORS issues
     },
     icon: path.join(__dirname, '../assets/icon.png'),
