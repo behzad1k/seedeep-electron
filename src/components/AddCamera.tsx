@@ -1,3 +1,4 @@
+// src/components/UpdatedAddCamera.tsx
 import React, { useState } from 'react';
 import {
   Box,
@@ -21,6 +22,15 @@ import {
   Card,
   CardContent,
   IconButton,
+  Checkbox,
+  FormGroup,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Slider,
+  RadioGroup,
+  Radio,
+  Tooltip
 } from '@mui/material';
 import {
   Videocam,
@@ -32,10 +42,19 @@ import {
   Refresh,
   Visibility,
   VisibilityOff,
+  ExpandMore,
+  SmartToy,
+  TrackChanges,
+  Upload,
+  WebCam,
+  Link as LinkIcon,
+  Help
 } from '@mui/icons-material';
 
 interface AddCameraProps {
   onClose?: () => void;
+  onSubmit?: (cameraData: CameraFormData) => void;
+  availableModels?: Array<{ name: string; classes: string[] }>;
 }
 
 interface CameraFormData {
@@ -45,95 +64,205 @@ interface CameraFormData {
   location: string;
 
   // Connection Settings
+  sourceType: 'webcam' | 'ip_camera' | 'rtsp' | 'file_upload';
   ipAddress: string;
   port: string;
   protocol: 'http' | 'https' | 'rtsp' | 'rtmp';
   streamUrl: string;
-
-  // Authentication
   username: string;
   password: string;
   authRequired: boolean;
 
   // Camera Settings
   resolution: string;
-  fps: string;
-  quality: string;
+  fps: number;
+  quality: 'low' | 'medium' | 'high' | 'ultra';
 
-  // Advanced Settings
+  // AI/ML Settings
+  enableAI: boolean;
+  selectedModels: string[];
+  confidenceThreshold: number;
+  trackingEnabled: boolean;
+  trackingConfig: {
+    trackerType: 'centroid' | 'kalman' | 'deep_sort';
+    maxDisappeared: number;
+    maxDistance: number;
+  };
+
+  // Features
   recordingEnabled: boolean;
   motionDetection: boolean;
   nightVision: boolean;
   audioEnabled: boolean;
+  alertsEnabled: boolean;
 
-  // Positioning
-  latitude: string;
-  longitude: string;
+  // Advanced
+  calibrationEnabled: boolean;
+  customStreamUrl: string;
+  bufferSize: number;
+  reconnectAttempts: number;
 }
 
-const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
+const INITIAL_FORM_DATA: CameraFormData = {
+  name: '',
+  description: '',
+  location: '',
+  sourceType: 'webcam',
+  ipAddress: '',
+  port: '554',
+  protocol: 'rtsp',
+  streamUrl: '',
+  username: '',
+  password: '',
+  authRequired: false,
+  resolution: '1920x1080',
+  fps: 15,
+  quality: 'medium',
+  enableAI: true,
+  selectedModels: [],
+  confidenceThreshold: 0.5,
+  trackingEnabled: false,
+  trackingConfig: {
+    trackerType: 'centroid',
+    maxDisappeared: 30,
+    maxDistance: 100
+  },
+  recordingEnabled: false,
+  motionDetection: true,
+  nightVision: false,
+  audioEnabled: false,
+  alertsEnabled: true,
+  calibrationEnabled: false,
+  customStreamUrl: '',
+  bufferSize: 30,
+  reconnectAttempts: 3
+};
+
+const RESOLUTION_OPTIONS = [
+  { value: '640x480', label: '480p (640×480)' },
+  { value: '1280x720', label: '720p (1280×720)' },
+  { value: '1920x1080', label: '1080p (1920×1080)' },
+  { value: '3840x2160', label: '4K (3840×2160)' }
+];
+
+const FPS_OPTIONS = [1, 2, 5, 10, 15, 20, 25, 30];
+
+const AddCamera: React.FC<AddCameraProps> = ({
+                                                      onClose,
+                                                      onSubmit,
+                                                      availableModels = [
+                                                        { name: 'ppe_detection', classes: ['helmet', 'vest', 'person'] },
+                                                        { name: 'face_detection', classes: ['mask', 'no_mask'] },
+                                                        { name: 'vehicle_detection', classes: ['car', 'truck', 'motorcycle'] },
+                                                        { name: 'others_detection', classes: ['person', 'bicycle', 'car'] }
+                                                      ]
+                                                    }) => {
   const [activeStep, setActiveStep] = useState(0);
+  const [formData, setFormData] = useState<CameraFormData>(INITIAL_FORM_DATA);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [connectionError, setConnectionError] = useState<string>('');
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState<CameraFormData>({
-    name: '',
-    description: '',
-    location: '',
-    ipAddress: '',
-    port: '554',
-    protocol: 'rtsp',
-    streamUrl: '',
-    username: '',
-    password: '',
-    authRequired: false,
-    resolution: '1920x1080',
-    fps: '30',
-    quality: 'high',
-    recordingEnabled: true,
-    motionDetection: true,
-    nightVision: false,
-    audioEnabled: false,
-    latitude: '',
-    longitude: '',
-  });
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
 
   const steps = [
     'Basic Information',
-    'Network Configuration',
-    'Authentication',
-    'Camera Settings',
+    'Source Configuration',
+    'AI & Detection',
+    'Features & Settings',
     'Review & Test'
   ];
 
   const handleInputChange = (field: keyof CameraFormData) => (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | any
   ) => {
-    const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+    const value = event.target.type === 'checkbox' ?
+      event.target.checked :
+      event.target.value;
+
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
   };
 
-  const testConnection = async () => {
-    setConnectionStatus('testing');
-    // Simulate connection test
-    setTimeout(() => {
-      // In real implementation, this would test the actual camera connection
-      const success = Math.random() > 0.3; // 70% success rate for demo
-      setConnectionStatus(success ? 'success' : 'error');
-    }, 2000);
+  const handleNestedInputChange = (parent: keyof CameraFormData, field: string) => (
+    event: React.ChangeEvent<HTMLInputElement> | any
+  ) => {
+    const value = event.target.type === 'checkbox' ?
+      event.target.checked :
+      event.target.value;
+
+    setFormData(prev => ({
+      ...prev,
+      [parent]: {
+        ...(prev[parent] as any),
+        [field]: value
+      }
+    }));
+  };
+
+  const handleModelToggle = (modelName: string) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedModels: prev.selectedModels.includes(modelName)
+        ? prev.selectedModels.filter(m => m !== modelName)
+        : [...prev.selectedModels, modelName]
+    }));
   };
 
   const generateStreamUrl = () => {
-    if (formData.ipAddress && formData.port) {
-      const url = `${formData.protocol}://${formData.ipAddress}:${formData.port}/stream`;
+    if (formData.sourceType === 'ip_camera' && formData.ipAddress && formData.port) {
+      const url = `${formData.protocol}://${formData.ipAddress}:${formData.port}`;
       setFormData(prev => ({ ...prev, streamUrl: url }));
     }
   };
 
+  const testConnection = async () => {
+    setConnectionStatus('testing');
+    setConnectionError('');
+
+    try {
+      if (formData.sourceType === 'webcam') {
+        // Test webcam access
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        });
+        setPreviewStream(stream);
+        setConnectionStatus('success');
+
+        // Stop the test stream after a moment
+        setTimeout(() => {
+          stream.getTracks().forEach(track => track.stop());
+          setPreviewStream(null);
+        }, 3000);
+
+      } else if (formData.sourceType === 'ip_camera' || formData.sourceType === 'rtsp') {
+        // For IP cameras, we'll simulate a connection test
+        // In a real implementation, you'd make an actual request to test the stream
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        if (formData.ipAddress && formData.port) {
+          setConnectionStatus('success');
+        } else {
+          setConnectionStatus('error');
+          setConnectionError('IP address and port are required');
+        }
+      } else {
+        setConnectionStatus('success');
+      }
+    } catch (error: any) {
+      setConnectionStatus('error');
+      setConnectionError(error.message || 'Connection failed');
+    }
+  };
+
   const handleNext = () => {
-    setActiveStep(prev => prev + 1);
+    if (isStepValid()) {
+      setActiveStep(prev => prev + 1);
+    }
   };
 
   const handleBack = () => {
@@ -141,29 +270,52 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
   };
 
   const handleSubmit = () => {
-    // In real implementation, this would send data to your API
-    console.log('Camera data:', formData);
-    alert('Camera added successfully!');
-    if (onClose) {
-      onClose();
+    if (onSubmit) {
+      onSubmit(formData);
     }
   };
 
+  const isStepValid = () => {
+    switch (activeStep) {
+      case 0:
+        return formData.name.trim() && formData.location.trim();
+      case 1:
+        return formData.sourceType === 'webcam' ||
+          (formData.ipAddress && formData.port) ||
+          formData.customStreamUrl;
+      case 2:
+        return !formData.enableAI || formData.selectedModels.length > 0;
+      case 3:
+        return true;
+      case 4:
+        return connectionStatus === 'success' || formData.sourceType === 'file_upload';
+      default:
+        return false;
+    }
+  };
+
+  // Step content renderers
   const renderBasicInfo = () => (
     <Grid container spacing={3}>
       <Grid item xs={12}>
-        <Typography variant="h6" gutterBottom>Basic Camera Information</Typography>
+        <Typography variant="h6" gutterBottom>Camera Information</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Provide basic information about your camera
+        </Typography>
       </Grid>
+
       <Grid item xs={12} md={6}>
         <TextField
           fullWidth
           label="Camera Name"
           value={formData.name}
           onChange={handleInputChange('name')}
-          placeholder="e.g., Front Entrance"
+          placeholder="e.g., Front Entrance, Parking Lot"
           required
+          helperText="Choose a unique, descriptive name"
         />
       </Grid>
+
       <Grid item xs={12} md={6}>
         <TextField
           fullWidth
@@ -172,8 +324,10 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
           onChange={handleInputChange('location')}
           placeholder="e.g., Building A - Ground Floor"
           required
+          helperText="Physical location of the camera"
         />
       </Grid>
+
       <Grid item xs={12}>
         <TextField
           fullWidth
@@ -183,146 +337,339 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
           placeholder="Brief description of camera purpose and coverage area"
           multiline
           rows={3}
-        />
-      </Grid>
-      <Grid item xs={12} md={6}>
-        <TextField
-          fullWidth
-          label="Latitude"
-          value={formData.latitude}
-          onChange={handleInputChange('latitude')}
-          placeholder="e.g., 40.7128"
-          type="number"
-        />
-      </Grid>
-      <Grid item xs={12} md={6}>
-        <TextField
-          fullWidth
-          label="Longitude"
-          value={formData.longitude}
-          onChange={handleInputChange('longitude')}
-          placeholder="e.g., -74.0060"
-          type="number"
+          helperText="Optional: Add more details about this camera"
         />
       </Grid>
     </Grid>
   );
 
-  const renderNetworkConfig = () => (
+  const renderSourceConfig = () => (
     <Grid container spacing={3}>
       <Grid item xs={12}>
-        <Typography variant="h6" gutterBottom>Network Configuration</Typography>
+        <Typography variant="h6" gutterBottom>Camera Source</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Configure how to connect to your camera
+        </Typography>
       </Grid>
-      <Grid item xs={12} md={6}>
-        <TextField
-          fullWidth
-          label="IP Address"
-          value={formData.ipAddress}
-          onChange={handleInputChange('ipAddress')}
-          placeholder="e.g., 192.168.1.100"
-          required
-        />
-      </Grid>
-      <Grid item xs={12} md={6}>
-        <TextField
-          fullWidth
-          label="Port"
-          value={formData.port}
-          onChange={handleInputChange('port')}
-          placeholder="e.g., 554"
-          type="number"
-          required
-        />
-      </Grid>
-      <Grid item xs={12} md={6}>
+
+      <Grid item xs={12}>
         <FormControl fullWidth>
-          <InputLabel>Protocol</InputLabel>
+          <InputLabel>Source Type</InputLabel>
           <Select
-            value={formData.protocol}
-            onChange={handleInputChange('protocol')}
-            label="Protocol"
+            value={formData.sourceType}
+            onChange={handleInputChange('sourceType')}
+            label="Source Type"
           >
-            <MenuItem value="rtsp">RTSP</MenuItem>
-            <MenuItem value="rtmp">RTMP</MenuItem>
-            <MenuItem value="http">HTTP</MenuItem>
-            <MenuItem value="https">HTTPS</MenuItem>
+            <MenuItem value="webcam">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <WebCam /> Webcam (USB/Built-in)
+              </Box>
+            </MenuItem>
+            <MenuItem value="ip_camera">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <NetworkCheck /> IP Camera
+              </Box>
+            </MenuItem>
+            <MenuItem value="rtsp">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <LinkIcon /> RTSP Stream
+              </Box>
+            </MenuItem>
+            <MenuItem value="file_upload">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Upload /> File Upload
+              </Box>
+            </MenuItem>
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={12} md={6}>
-        <Box display="flex" gap={1}>
-          <TextField
-            fullWidth
-            label="Stream URL"
-            value={formData.streamUrl}
-            onChange={handleInputChange('streamUrl')}
-            placeholder="Will be auto-generated"
-          />
-          <Button variant="outlined" onClick={generateStreamUrl}>
-            Generate
-          </Button>
-        </Box>
-      </Grid>
-    </Grid>
-  );
 
-  const renderAuthentication = () => (
-    <Grid container spacing={3}>
-      <Grid item xs={12}>
-        <Typography variant="h6" gutterBottom>Authentication Settings</Typography>
-      </Grid>
-      <Grid item xs={12}>
-        <FormControlLabel
-          control={
-            <Switch
-              checked={formData.authRequired}
-              onChange={handleInputChange('authRequired')}
-            />
-          }
-          label="Authentication Required"
-        />
-      </Grid>
-      {formData.authRequired && (
+      {(formData.sourceType === 'ip_camera' || formData.sourceType === 'rtsp') && (
         <>
           <Grid item xs={12} md={6}>
             <TextField
               fullWidth
-              label="Username"
-              value={formData.username}
-              onChange={handleInputChange('username')}
-              placeholder="Camera username"
+              label="IP Address"
+              value={formData.ipAddress}
+              onChange={handleInputChange('ipAddress')}
+              placeholder="e.g., 192.168.1.100"
+              required
             />
           </Grid>
+
           <Grid item xs={12} md={6}>
             <TextField
               fullWidth
-              label="Password"
-              type={showPassword ? 'text' : 'password'}
-              value={formData.password}
-              onChange={handleInputChange('password')}
-              placeholder="Camera password"
-              InputProps={{
-                endAdornment: (
-                  <IconButton
-                    onClick={() => setShowPassword(!showPassword)}
-                    edge="end"
-                  >
-                    {showPassword ? <VisibilityOff /> : <Visibility />}
-                  </IconButton>
-                ),
-              }}
+              label="Port"
+              value={formData.port}
+              onChange={handleInputChange('port')}
+              placeholder="e.g., 554"
+              type="number"
+              required
             />
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth>
+              <InputLabel>Protocol</InputLabel>
+              <Select
+                value={formData.protocol}
+                onChange={handleInputChange('protocol')}
+                label="Protocol"
+              >
+                <MenuItem value="rtsp">RTSP</MenuItem>
+                <MenuItem value="rtmp">RTMP</MenuItem>
+                <MenuItem value="http">HTTP</MenuItem>
+                <MenuItem value="https">HTTPS</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Box display="flex" gap={1}>
+              <TextField
+                fullWidth
+                label="Stream URL"
+                value={formData.streamUrl}
+                onChange={handleInputChange('streamUrl')}
+                placeholder="Auto-generated or custom URL"
+              />
+              <Button variant="outlined" onClick={generateStreamUrl}>
+                Generate
+              </Button>
+            </Box>
+          </Grid>
+
+          <Grid item xs={12}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.authRequired}
+                  onChange={handleInputChange('authRequired')}
+                />
+              }
+              label="Authentication Required"
+            />
+          </Grid>
+
+          {formData.authRequired && (
+            <>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Username"
+                  value={formData.username}
+                  onChange={handleInputChange('username')}
+                  placeholder="Camera username"
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={formData.password}
+                  onChange={handleInputChange('password')}
+                  placeholder="Camera password"
+                  InputProps={{
+                    endAdornment: (
+                      <IconButton
+                        onClick={() => setShowPassword(!showPassword)}
+                        edge="end"
+                      >
+                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    ),
+                  }}
+                />
+              </Grid>
+            </>
+          )}
+        </>
+      )}
+
+      {formData.sourceType === 'webcam' && (
+        <Grid item xs={12}>
+          <Alert severity="info">
+            This will use your device's built-in camera or connected USB camera.
+            Make sure you grant camera permissions when prompted.
+          </Alert>
+        </Grid>
+      )}
+
+      {formData.sourceType === 'file_upload' && (
+        <Grid item xs={12}>
+          <Alert severity="info">
+            You can upload video files for processing. Supported formats: MP4, AVI, MOV, MKV.
+          </Alert>
+        </Grid>
+      )}
+    </Grid>
+  );
+
+  const renderAISettings = () => (
+    <Grid container spacing={3}>
+      <Grid item xs={12}>
+        <Typography variant="h6" gutterBottom>AI Detection & Tracking</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Configure AI models and object tracking
+        </Typography>
+      </Grid>
+
+      <Grid item xs={12}>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={formData.enableAI}
+              onChange={handleInputChange('enableAI')}
+            />
+          }
+          label="Enable AI Detection"
+        />
+      </Grid>
+
+      {formData.enableAI && (
+        <>
+          <Grid item xs={12}>
+            <Typography variant="subtitle1" gutterBottom>
+              Available AI Models
+            </Typography>
+            <FormGroup>
+              {availableModels.map((model) => (
+                <Box key={model.name} sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={formData.selectedModels.includes(model.name)}
+                        onChange={() => handleModelToggle(model.name)}
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body1">
+                          {model.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        </Typography>
+                        <Box sx={{ mt: 0.5 }}>
+                          {model.classes.map((cls) => (
+                            <Chip
+                              key={cls}
+                              label={cls}
+                              size="small"
+                              sx={{ mr: 0.5, mb: 0.5 }}
+                            />
+                          ))}
+                        </Box>
+                      </Box>
+                    }
+                  />
+                </Box>
+              ))}
+            </FormGroup>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Typography gutterBottom>
+              Confidence Threshold: {(formData.confidenceThreshold * 100).toFixed(0)}%
+            </Typography>
+            <Slider
+              value={formData.confidenceThreshold}
+              onChange={(_, value) => setFormData(prev => ({
+                ...prev,
+                confidenceThreshold: value as number
+              }))}
+              min={0.1}
+              max={1.0}
+              step={0.05}
+              marks={[
+                { value: 0.3, label: '30%' },
+                { value: 0.5, label: '50%' },
+                { value: 0.7, label: '70%' },
+                { value: 0.9, label: '90%' }
+              ]}
+            />
+          </Grid>
+
+          <Grid item xs={12}>
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMore />}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <TrackChanges />
+                  <Typography>Object Tracking Settings</Typography>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.trackingEnabled}
+                          onChange={handleInputChange('trackingEnabled')}
+                        />
+                      }
+                      label="Enable Object Tracking"
+                    />
+                  </Grid>
+
+                  {formData.trackingEnabled && (
+                    <>
+                      <Grid item xs={12} md={4}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Tracker Type</InputLabel>
+                          <Select
+                            value={formData.trackingConfig.trackerType}
+                            onChange={handleNestedInputChange('trackingConfig', 'trackerType')}
+                            label="Tracker Type"
+                          >
+                            <MenuItem value="centroid">Centroid</MenuItem>
+                            <MenuItem value="kalman">Kalman Filter</MenuItem>
+                            <MenuItem value="deep_sort">DeepSORT</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Grid>
+
+                      <Grid item xs={12} md={4}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          label="Max Disappeared Frames"
+                          type="number"
+                          value={formData.trackingConfig.maxDisappeared}
+                          onChange={handleNestedInputChange('trackingConfig', 'maxDisappeared')}
+                        />
+                      </Grid>
+
+                      <Grid item xs={12} md={4}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          label="Max Distance (pixels)"
+                          type="number"
+                          value={formData.trackingConfig.maxDistance}
+                          onChange={handleNestedInputChange('trackingConfig', 'maxDistance')}
+                        />
+                      </Grid>
+                    </>
+                  )}
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
           </Grid>
         </>
       )}
     </Grid>
   );
 
-  const renderCameraSettings = () => (
+  const renderFeatures = () => (
     <Grid container spacing={3}>
       <Grid item xs={12}>
-        <Typography variant="h6" gutterBottom>Camera Settings</Typography>
+        <Typography variant="h6" gutterBottom>Features & Settings</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Configure camera features and quality settings
+        </Typography>
       </Grid>
+
       <Grid item xs={12} md={4}>
         <FormControl fullWidth>
           <InputLabel>Resolution</InputLabel>
@@ -331,13 +678,15 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
             onChange={handleInputChange('resolution')}
             label="Resolution"
           >
-            <MenuItem value="1920x1080">1080p (1920×1080)</MenuItem>
-            <MenuItem value="1280x720">720p (1280×720)</MenuItem>
-            <MenuItem value="3840x2160">4K (3840×2160)</MenuItem>
-            <MenuItem value="640x480">480p (640×480)</MenuItem>
+            {RESOLUTION_OPTIONS.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
           </Select>
         </FormControl>
       </Grid>
+
       <Grid item xs={12} md={4}>
         <FormControl fullWidth>
           <InputLabel>Frame Rate</InputLabel>
@@ -346,13 +695,15 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
             onChange={handleInputChange('fps')}
             label="Frame Rate"
           >
-            <MenuItem value="15">15 FPS</MenuItem>
-            <MenuItem value="25">25 FPS</MenuItem>
-            <MenuItem value="30">30 FPS</MenuItem>
-            <MenuItem value="60">60 FPS</MenuItem>
+            {FPS_OPTIONS.map((fps) => (
+              <MenuItem key={fps} value={fps}>
+                {fps} FPS
+              </MenuItem>
+            ))}
           </Select>
         </FormControl>
       </Grid>
+
       <Grid item xs={12} md={4}>
         <FormControl fullWidth>
           <InputLabel>Quality</InputLabel>
@@ -371,7 +722,7 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
 
       <Grid item xs={12}>
         <Divider sx={{ my: 2 }} />
-        <Typography variant="subtitle1" gutterBottom>Features</Typography>
+        <Typography variant="subtitle1" gutterBottom>Camera Features</Typography>
       </Grid>
 
       <Grid item xs={12} md={6}>
@@ -385,6 +736,7 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
           label="Enable Recording"
         />
       </Grid>
+
       <Grid item xs={12} md={6}>
         <FormControlLabel
           control={
@@ -396,17 +748,19 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
           label="Motion Detection"
         />
       </Grid>
+
       <Grid item xs={12} md={6}>
         <FormControlLabel
           control={
             <Switch
-              checked={formData.nightVision}
-              onChange={handleInputChange('nightVision')}
+              checked={formData.alertsEnabled}
+              onChange={handleInputChange('alertsEnabled')}
             />
           }
-          label="Night Vision"
+          label="Enable Alerts"
         />
       </Grid>
+
       <Grid item xs={12} md={6}>
         <FormControlLabel
           control={
@@ -418,6 +772,53 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
           label="Audio Recording"
         />
       </Grid>
+
+      <Grid item xs={12}>
+        <Accordion>
+          <AccordionSummary expandIcon={<ExpandMore />}>
+            <Typography>Advanced Settings</Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Buffer Size (seconds)"
+                  type="number"
+                  value={formData.bufferSize}
+                  onChange={handleInputChange('bufferSize')}
+                  helperText="How long to buffer video data"
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Reconnect Attempts"
+                  type="number"
+                  value={formData.reconnectAttempts}
+                  onChange={handleInputChange('reconnectAttempts')}
+                  helperText="Number of reconnection attempts"
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={formData.calibrationEnabled}
+                      onChange={handleInputChange('calibrationEnabled')}
+                    />
+                  }
+                  label="Enable Calibration for Distance Measurement"
+                />
+              </Grid>
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
+      </Grid>
     </Grid>
   );
 
@@ -425,64 +826,80 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
     <Grid container spacing={3}>
       <Grid item xs={12}>
         <Typography variant="h6" gutterBottom>Review Configuration</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Review your camera settings before adding
+        </Typography>
       </Grid>
 
       {/* Basic Info Card */}
       <Grid item xs={12} md={6}>
-        <Card>
+        <Card variant="outlined">
           <CardContent>
             <Typography variant="subtitle1" gutterBottom color="primary">
+              <Videocam sx={{ mr: 1, verticalAlign: 'middle' }} />
               Basic Information
             </Typography>
             <Typography variant="body2"><strong>Name:</strong> {formData.name}</Typography>
             <Typography variant="body2"><strong>Location:</strong> {formData.location}</Typography>
-            <Typography variant="body2"><strong>Description:</strong> {formData.description}</Typography>
+            {formData.description && (
+              <Typography variant="body2"><strong>Description:</strong> {formData.description}</Typography>
+            )}
           </CardContent>
         </Card>
       </Grid>
 
-      {/* Network Config Card */}
+      {/* Source Config Card */}
       <Grid item xs={12} md={6}>
-        <Card>
+        <Card variant="outlined">
           <CardContent>
             <Typography variant="subtitle1" gutterBottom color="primary">
-              Network Configuration
+              <NetworkCheck sx={{ mr: 1, verticalAlign: 'middle' }} />
+              Source Configuration
             </Typography>
-            <Typography variant="body2"><strong>IP Address:</strong> {formData.ipAddress}</Typography>
-            <Typography variant="body2"><strong>Port:</strong> {formData.port}</Typography>
+            <Typography variant="body2"><strong>Type:</strong> {formData.sourceType.replace('_', ' ').toUpperCase()}</Typography>
+            {formData.ipAddress && <Typography variant="body2"><strong>IP:</strong> {formData.ipAddress}:{formData.port}</Typography>}
+            {formData.streamUrl && <Typography variant="body2"><strong>URL:</strong> {formData.streamUrl}</Typography>}
             <Typography variant="body2"><strong>Protocol:</strong> {formData.protocol.toUpperCase()}</Typography>
-            <Typography variant="body2"><strong>Stream URL:</strong> {formData.streamUrl}</Typography>
           </CardContent>
         </Card>
       </Grid>
 
-      {/* Camera Settings Card */}
+      {/* AI Settings Card */}
       <Grid item xs={12} md={6}>
-        <Card>
+        <Card variant="outlined">
           <CardContent>
             <Typography variant="subtitle1" gutterBottom color="primary">
-              Camera Settings
+              <SmartToy sx={{ mr: 1, verticalAlign: 'middle' }} />
+              AI & Detection
+            </Typography>
+            <Typography variant="body2"><strong>AI Enabled:</strong> {formData.enableAI ? 'Yes' : 'No'}</Typography>
+            {formData.enableAI && (
+              <>
+                <Typography variant="body2"><strong>Models:</strong> {formData.selectedModels.length}</Typography>
+                <Typography variant="body2"><strong>Confidence:</strong> {(formData.confidenceThreshold * 100).toFixed(0)}%</Typography>
+                <Typography variant="body2"><strong>Tracking:</strong> {formData.trackingEnabled ? 'Enabled' : 'Disabled'}</Typography>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </Grid>
+
+      {/* Quality Settings Card */}
+      <Grid item xs={12} md={6}>
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="subtitle1" gutterBottom color="primary">
+              <Settings sx={{ mr: 1, verticalAlign: 'middle' }} />
+              Quality & Features
             </Typography>
             <Typography variant="body2"><strong>Resolution:</strong> {formData.resolution}</Typography>
             <Typography variant="body2"><strong>Frame Rate:</strong> {formData.fps} FPS</Typography>
             <Typography variant="body2"><strong>Quality:</strong> {formData.quality}</Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-
-      {/* Features Card */}
-      <Grid item xs={12} md={6}>
-        <Card>
-          <CardContent>
-            <Typography variant="subtitle1" gutterBottom color="primary">
-              Enabled Features
-            </Typography>
-            <Box display="flex" flexWrap="wrap" gap={1}>
-              {formData.recordingEnabled && <Chip label="Recording" color="success" size="small" />}
-              {formData.motionDetection && <Chip label="Motion Detection" color="success" size="small" />}
-              {formData.nightVision && <Chip label="Night Vision" color="success" size="small" />}
-              {formData.audioEnabled && <Chip label="Audio" color="success" size="small" />}
-              {formData.authRequired && <Chip label="Authentication" color="warning" size="small" />}
+            <Box sx={{ mt: 1 }}>
+              {formData.recordingEnabled && <Chip label="Recording" size="small" sx={{ mr: 0.5 }} />}
+              {formData.motionDetection && <Chip label="Motion Detection" size="small" sx={{ mr: 0.5 }} />}
+              {formData.alertsEnabled && <Chip label="Alerts" size="small" sx={{ mr: 0.5 }} />}
+              {formData.trackingEnabled && <Chip label="Tracking" size="small" sx={{ mr: 0.5 }} />}
             </Box>
           </CardContent>
         </Card>
@@ -490,14 +907,14 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
 
       {/* Connection Test */}
       <Grid item xs={12}>
-        <Paper sx={{ p: 2, backgroundColor: 'background.default' }}>
+        <Paper sx={{ p: 3, backgroundColor: 'background.default' }}>
           <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
             <Typography variant="subtitle1">Connection Test</Typography>
             <Button
               variant="outlined"
               startIcon={connectionStatus === 'testing' ? <Refresh className="animate-spin" /> : <NetworkCheck />}
               onClick={testConnection}
-              disabled={connectionStatus === 'testing' || !formData.ipAddress}
+              disabled={connectionStatus === 'testing'}
             >
               {connectionStatus === 'testing' ? 'Testing...' : 'Test Connection'}
             </Button>
@@ -505,13 +922,19 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
 
           {connectionStatus === 'success' && (
             <Alert severity="success" icon={<CheckCircle />}>
-              Connection successful! Camera is reachable and ready to add.
+              Connection successful! Camera is ready to be added.
             </Alert>
           )}
 
           {connectionStatus === 'error' && (
             <Alert severity="error" icon={<Error />}>
-              Connection failed. Please check your network settings and try again.
+              Connection failed: {connectionError || 'Please check your settings and try again.'}
+            </Alert>
+          )}
+
+          {connectionStatus === 'idle' && formData.sourceType !== 'file_upload' && (
+            <Alert severity="info">
+              Click "Test Connection" to verify your camera settings before adding.
             </Alert>
           )}
         </Paper>
@@ -522,22 +945,11 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
   const renderStepContent = () => {
     switch (activeStep) {
       case 0: return renderBasicInfo();
-      case 1: return renderNetworkConfig();
-      case 2: return renderAuthentication();
-      case 3: return renderCameraSettings();
+      case 1: return renderSourceConfig();
+      case 2: return renderAISettings();
+      case 3: return renderFeatures();
       case 4: return renderReview();
       default: return null;
-    }
-  };
-
-  const isStepValid = () => {
-    switch (activeStep) {
-      case 0: return formData.name && formData.location;
-      case 1: return formData.ipAddress && formData.port;
-      case 2: return !formData.authRequired || (formData.username && formData.password);
-      case 3: return true;
-      case 4: return connectionStatus === 'success';
-      default: return false;
     }
   };
 
@@ -571,7 +983,7 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose }) => {
 
           <Box sx={{ display: 'flex', gap: 2 }}>
             <Button
-              onClick={() => onClose && onClose()}
+              onClick={onClose}
               variant="outlined"
               color="inherit"
             >
