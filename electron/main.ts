@@ -15,7 +15,7 @@ function createWindow(): void {
       preload: path.join(__dirname, '/preload.js'),
       webSecurity: false, // Disable for development to avoid CORS issues
     },
-    icon: path.join(__dirname, '../assets/icon.png'),
+    icon: path.join(__dirname, '@/assets/icon.png'),
     titleBarStyle: 'default',
     show: false, // Don't show until ready-to-show
   });
@@ -29,7 +29,7 @@ function createWindow(): void {
         mainWindow.webContents.openDevTools();
         console.log('Development server loaded successfully');
       } else {
-        await mainWindow.loadFile(path.join(__dirname, '../build/index.html'));
+        await mainWindow.loadFile(path.join(__dirname, '@/build/index.html'));
       }
     } catch (error) {
       console.error('Failed to load application:', error);

@@ -1,4 +1,4 @@
-// src/components/FullScreenCameraView.tsx
+import { Camera } from '@/types';
 import React from 'react';
 import {
   Box,
@@ -15,20 +15,6 @@ import {
   Fullscreen,
   FullscreenExit,
 } from '@mui/icons-material';
-
-interface Camera {
-  id: number;
-  name: string;
-  status: 'online' | 'offline' | 'recording';
-  location: string;
-  detectionModels?: {
-    ppeDetection: boolean;
-    personDetection: boolean;
-    vehicleDetection: boolean;
-    fireDetection: boolean;
-    weaponDetection: boolean;
-  };
-}
 
 interface FullScreenCameraViewProps {
   camera: Camera;
@@ -58,7 +44,7 @@ const FullScreenCameraView: React.FC<FullScreenCameraViewProps> = ({
         const modelNames: Record<string, string> = {
           ppeDetection: 'PPE',
           personDetection: 'Person',
-          vehicleDetection: 'Vehicle',
+          generalDetection: 'General',
           fireDetection: 'Fire',
           weaponDetection: 'Mask',
         };

@@ -1,4 +1,3 @@
-// src/components/UpdatedAddCamera.tsx
 import React, { useState } from 'react';
 import {
   Box,
@@ -46,7 +45,6 @@ import {
   SmartToy,
   TrackChanges,
   Upload,
-  WebCam,
   Link as LinkIcon,
   Help
 } from '@mui/icons-material';
@@ -153,7 +151,7 @@ const AddCamera: React.FC<AddCameraProps> = ({
                                                       availableModels = [
                                                         { name: 'ppe_detection', classes: ['helmet', 'vest', 'person'] },
                                                         { name: 'face_detection', classes: ['mask', 'no_mask'] },
-                                                        { name: 'vehicle_detection', classes: ['car', 'truck', 'motorcycle'] },
+                                                        { name: 'general_detection', classes: ['car', 'truck', 'motorcycle'] },
                                                         { name: 'others_detection', classes: ['person', 'bicycle', 'car'] }
                                                       ]
                                                     }) => {
@@ -269,12 +267,45 @@ const AddCamera: React.FC<AddCameraProps> = ({
     setActiveStep(prev => prev - 1);
   };
 
-  const handleSubmit = () => {
-    if (onSubmit) {
-      onSubmit(formData);
+  const handleSubmit = async () => {
+    try {
+      const cameraData = {
+        name: formData.name,
+        location: formData.location,
+        description: formData.description,
+        rtsp_url: formData.streamUrl,
+        width: parseInt(formData.resolution.split('x')[0]),
+        height: parseInt(formData.resolution.split('x')[1]),
+        fps: formData.fps,
+        features: {
+          detection: formData.enableAI,
+          tracking: formData.trackingEnabled,
+          speed: formData.trackingEnabled && formData.calibrationEnabled,
+          counting: false,
+        },
+        active_models: formData.selectedModels,
+      };
+
+      const response = await fetch('http://localhost:8000/api/v1/cameras', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cameraData),
+      });
+
+      if (response.ok) {
+        const newCamera = await response.json();
+        if (onSubmit) onSubmit(newCamera);
+        alert('Camera added successfully!');
+        onClose?.();
+      } else {
+        const error = await response.json();
+        alert(`Failed to add camera: ${error.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error adding camera:', error);
+      alert('Failed to add camera');
     }
   };
-
   const isStepValid = () => {
     switch (activeStep) {
       case 0:
@@ -362,7 +393,7 @@ const AddCamera: React.FC<AddCameraProps> = ({
           >
             <MenuItem value="webcam">
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <WebCam /> Webcam (USB/Built-in)
+                 Webcam (USB/Built-in)
               </Box>
             </MenuItem>
             <MenuItem value="ip_camera">

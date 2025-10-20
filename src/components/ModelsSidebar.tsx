@@ -25,7 +25,7 @@ import {
   GpsFixed,
   CheckCircle,
 } from '@mui/icons-material';
-import { Camera, DetectionModelKey } from "../types/camera";
+import { Camera, DetectionModelKey } from "@/types/camera";
 
 interface ModelClass {
   id: string;
@@ -94,12 +94,12 @@ const ModelsSidebar: React.FC<ModelsSidebarProps> = ({
       ]
     },
     {
-      key: 'vehicleDetection',
-      label: 'Vehicle Detection',
-      description: 'Vehicle type identification',
+      key: 'generalDetection',
+      label: 'General Detection',
+      description: 'General type identification',
       icon: <DirectionsCar />,
       color: '#ff9800',
-      enabled: selectedCamera?.detectionModels?.vehicleDetection || false,
+      enabled: selectedCamera?.detectionModels?.generalDetection || false,
       expanded: false,
       classes: [
         { id: 'car', label: 'Car', enabled: false },

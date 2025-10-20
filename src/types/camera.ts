@@ -1,7 +1,7 @@
-// Camera-related type definitions for SeeDeep CCTV system
+import { cameraApi } from '@/services/api/cameraApi';
 
 export interface Camera {
-  id: number;
+  id: string;
   name: string;
   status: 'online' | 'offline' | 'recording';
   location: string;
@@ -9,6 +9,7 @@ export interface Camera {
 
   // Network settings
   ipAddress?: string;
+  rtsp_url?: string;
   port?: string;
   protocol?: 'http' | 'https' | 'rtsp' | 'rtmp';
   streamUrl?: string;
@@ -20,6 +21,9 @@ export interface Camera {
 
   // Camera settings
   resolution?: string;
+  isCalibrated?: boolean;
+  pixelsPerMeter?: number;
+  calibrationMode?: string;
   fps?: string;
   quality?: 'low' | 'medium' | 'high' | 'ultra';
 
@@ -33,7 +37,7 @@ export interface Camera {
   detectionModels?: {
     ppeDetection: boolean;
     personDetection: boolean;
-    vehicleDetection: boolean;
+    generalDetection: boolean;
     fireDetection: boolean;
     weaponDetection: boolean;
   };
@@ -46,6 +50,9 @@ export interface Camera {
   createdAt?: string;
   updatedAt?: string;
   lastSeen?: string;
+  width?: string
+  height?: string
+
 }
 
 export interface CameraFormData {
@@ -83,7 +90,7 @@ export interface CameraFormData {
 
 export type GridSize = '2x2' | '3x3' | '4x4' | '5x5';
 
-export type DetectionModelKey = 'ppeDetection' | 'personDetection' | 'vehicleDetection' | 'fireDetection' | 'weaponDetection';
+export type DetectionModelKey = 'ppeDetection' | 'personDetection' | 'generalDetection' | 'fireDetection' | 'weaponDetection';
 
 export interface ConnectionTestResult {
   success: boolean;

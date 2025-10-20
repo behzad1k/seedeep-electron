@@ -1,6 +1,17 @@
-// Component exports for SeeDeep CCTV system
-export { default as AddCamera } from './AddCamera';
-export { default as CameraGrid } from './CameraGrid';
-export { default as Sidebar } from './Sidebar';
-export { default as ModelsSidebar } from './ModelsSidebar';
-export { default as FullScreenCameraView } from './FullScreenCameraView';
+
+// Layout Components
+export { AppSidebar } from './AppSidebar';
+export { AppHeader } from './AppHeader';
+export { GridControls } from './GridControls';
+export { CameraStats } from './CameraStats';
+
+// Camera Components
+export { CameraGrid } from './CameraGrid';
+export { CameraTile } from './CameraTile';
+export { EmptySlot } from './EmptySlot';
+export { VirtualizedCameraGrid } from './VirtualizedCameraGrid';
+export { CameraFeed } from './CameraFeed';
+export { LazyLoadedCameraTile } from './LazyLoadedCameraTile';
+
+export { BackendHealthIndicator } from './BackendHealthIndicator'
+export { default as FullScreenCameraView } from './FullScreenCameraView'

@@ -1,6 +1,6 @@
 // hooks/useTracking.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { TrackingWebSocketService } from '../services/TrackingWebSocketService';
+import { TrackingWebSocketService } from '@/services/TrackingWebSocketService';
 
 interface UseTrackingOptions {
   wsUrl?: string;

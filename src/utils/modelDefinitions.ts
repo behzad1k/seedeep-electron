@@ -10,7 +10,7 @@ export interface ModelDefinition {
 export const MODEL_DEFINITIONS: Record<string, ModelDefinition> = {
   'ppe_detection': {
     name: 'PPE',
-    classes: ['Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest', 'Person', 'Safety Cone', 'Safety Vest', 'Machinery', 'Vehicle'],
+    classes: ['Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest', 'Person', 'Safety Cone', 'Safety Vest', 'Machinery', 'General'],
     description: 'Personal Protective Equipment detection',
     category: 'safety',
     modelSize: 'nano',
@@ -89,9 +89,9 @@ Object.keys(CLASSES_BY_CATEGORY).forEach(category => {
 // Predefined class combinations for quick selection
 export const QUICK_SELECTION_PRESETS = {
   'Basic Safety': ['person', 'helmet', 'vest', 'with_mask'],
-  'Construction Site': ['person', 'helmet', 'hard_hat', 'vest', 'safety_boots', 'construction_vehicle'],
+  'Construction Site': ['person', 'helmet', 'hard_hat', 'vest', 'safety_boots', 'construction_general'],
   'Office Safety': ['person', 'with_mask', 'without_mask', 'fire_extinguisher'],
-  'Vehicle Monitoring': ['car', 'truck', 'motorcycle', 'bicycle', 'person'],
+  'General Monitoring': ['car', 'truck', 'motorcycle', 'bicycle', 'person'],
   'Security Screening': ['person', 'weapon', 'suspicious_object', 'gun', 'knife'],
   'Fire Safety': ['fire', 'smoke', 'fire_extinguisher', 'exit_sign', 'person'],
   'PPE Compliance': ['helmet', 'vest', 'gloves', 'boots', 'safety_glasses', 'with_mask'],
@@ -102,7 +102,7 @@ export const QUICK_SELECTION_PRESETS = {
 export const COMMON_CLASS_GROUPS = {
   'All PPE': ['helmet', 'vest', 'gloves', 'boots', 'safety_glasses', 'hard_hat', 'cap'],
   'Basic Safety': ['helmet', 'vest', 'with_mask'],
-  'All Vehicles': ['car', 'truck', 'motorcycle', 'bicycle', 'bus', 'van'],
+  'All Generals': ['car', 'truck', 'motorcycle', 'bicycle', 'bus', 'van'],
   'People Only': ['person', 'worker', 'visitor'],
   'Fire Safety': ['fire', 'smoke', 'fire_extinguisher', 'exit_sign']
 };
