@@ -1,5 +1,5 @@
-import { BackendHealthIndicator } from '@/components';
-import MainWindow from './windows/MainWindow';
+import { BackendHealthIndicator } from '@components/layout/BackendHealthIndicator.tsx';
+import MainLayout from '@core/layouts/MainLayout.tsx';
 import React, { useState } from 'react';
 import {
   ThemeProvider,
@@ -32,7 +32,7 @@ const App: React.FC = () => {
 
   return(
     <ThemeProvider theme={theme}>
-      <MainWindow />
+      <MainLayout/>
       <BackendHealthIndicator position="top-right" />
       <CssBaseline />
     </ThemeProvider>
