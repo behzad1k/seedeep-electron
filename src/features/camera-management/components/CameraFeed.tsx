@@ -1,7 +1,7 @@
 import { FrameRateLimiter } from '@utils/performance/FrameRateLimiter.ts';
 import { WebSocketPool } from '@utils/websocket/WebsocketPool.ts';
 import React, { useRef, useEffect, useCallback, memo, useState } from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, CircularProgress } from '@mui/material';
 
 interface CameraFeedProps {
   cameraId: string | number;
@@ -22,43 +22,38 @@ interface DetectionBox {
   label: string;
 }
 
-/**
- * Optimized Camera Feed Component integrated with FastAPI backend
- * - Uses shared WebSocket connection pool
- * - Frame rate limiting
- * - Lazy loading support
- * - Proper cleanup on unmount
- * - Renders detection boxes from backend
- */
 export const CameraFeed = memo<CameraFeedProps>(({
-                                                                     cameraId,
-                                                                     wsUrl = 'ws://localhost:8000/ws',
-                                                                     targetFPS = 15,
-                                                                     onFrame,
-                                                                     onError,
-                                                                     isVisible = true,
-                                                                     renderDetections = true
-                                                                   }) => {
+                                                   cameraId,
+                                                   wsUrl = 'ws://localhost:8000',
+                                                   targetFPS = 15,
+                                                   onFrame,
+                                                   onError,
+                                                   isVisible = true,
+                                                   renderDetections = true
+                                                 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const frameRateLimiterRef = useRef(new FrameRateLimiter(targetFPS));
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const isActiveRef = useRef(true);
-  const animationFrameRef = useRef<number | null>(null);
 
   const [detections, setDetections] = useState<DetectionBox[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [lastFrame, setLastFrame] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Handle WebSocket messages from backend
   const handleMessage = useCallback((data: any) => {
-    console.log(isActiveRef.current, isVisible, data.camera_id !== cameraId.toString());
     if (!isActiveRef.current || !isVisible) return;
 
-    // Check if this message is for our camera
-    if (data.camera_id !== cameraId.toString()) return;
+    if (data.camera_id && data.camera_id !== cameraId.toString()) return;
 
     setIsConnected(true);
+    setError(null);
     onFrame?.(data);
+
+    // If backend sends back the frame as base64
+    if (data.frame) {
+      setLastFrame(data.frame);
+    }
 
     // Extract detections from all models
     if (data.results && renderDetections) {
@@ -88,11 +83,20 @@ export const CameraFeed = memo<CameraFeedProps>(({
     if (!isVisible) return;
 
     const pool = WebSocketPool.getInstance();
+    const cameraWsUrl = `${wsUrl.replace(/\/ws$/, '')}/ws/camera/${cameraId}`;
+
+    console.log('[CameraFeed] Connecting to:', cameraWsUrl);
+
     unsubscribeRef.current = pool.subscribe(
-      wsUrl,
+      cameraWsUrl,
       cameraId.toString(),
       handleMessage,
-      onError
+      (err) => {
+        console.error('[CameraFeed] WebSocket error:', err);
+        setIsConnected(false);
+        setError('Connection error');
+        onError?.(err);
+      }
     );
 
     return () => {
@@ -104,167 +108,88 @@ export const CameraFeed = memo<CameraFeedProps>(({
     };
   }, [cameraId, wsUrl, isVisible, handleMessage, onError]);
 
-  // Send frames to backend
-  const sendFrameToBackend = useCallback(async () => {
-    if (!videoRef.current || !isVisible || !isActiveRef.current) return;
-
-    // Apply frame rate limiting
-    if (!frameRateLimiterRef.current.shouldProcessFrame()) {
-      animationFrameRef.current = requestAnimationFrame(sendFrameToBackend);
-      return;
-    }
-
-    try {
-      const video = videoRef.current;
-
-      // Create canvas to capture frame
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = video.videoWidth;
-      tempCanvas.height = video.videoHeight;
-      const ctx = tempCanvas.getContext('2d');
-
-      if (ctx) {
-        ctx.drawImage(video, 0, 0);
-
-        // Convert to JPEG blob
-        tempCanvas.toBlob(async (blob) => {
-          if (blob) {
-            const arrayBuffer = await blob.arrayBuffer();
-            const pool = WebSocketPool.getInstance();
-
-            pool.sendBinaryFrame(wsUrl, {
-              cameraId: cameraId.toString(),
-              timestamp: Math.floor(Date.now() / 1000),
-              imageData: arrayBuffer
-            });
-          }
-        }, 'image/jpeg', 0.8);
-      }
-    } catch (error) {
-      console.error('[CameraFeed] Error sending frame:', error);
-      onError?.(error);
-    }
-
-    animationFrameRef.current = requestAnimationFrame(sendFrameToBackend);
-  }, [isVisible, cameraId, wsUrl, onError]);
-
-  // Start/stop frame capture based on visibility
+  // Draw frame and detections on canvas
   useEffect(() => {
-    if (isVisible && videoRef.current) {
-      animationFrameRef.current = requestAnimationFrame(sendFrameToBackend);
-    }
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-    };
-  }, [isVisible, sendFrameToBackend]);
-
-  // Draw detections on canvas
-  useEffect(() => {
-    if (!canvasRef.current || !videoRef.current || !renderDetections) return;
+    if (!canvasRef.current || !lastFrame) return;
 
     const canvas = canvasRef.current;
-    const video = videoRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
 
-    // Draw video frame
-    if (video.videoWidth > 0) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
+      if (renderDetections) {
+        detections.forEach((det) => {
+          ctx.strokeStyle = '#00ff00';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(det.x1, det.y1, det.x2 - det.x1, det.y2 - det.y1);
 
-      // Draw detection boxes
-      detections.forEach((det) => {
-        // Draw box
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(det.x1, det.y1, det.x2 - det.x1, det.y2 - det.y1);
+          const label = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
+          ctx.font = '14px Arial';
+          const textMetrics = ctx.measureText(label);
+          const textHeight = 20;
 
-        // Draw label background
-        const label = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
-        ctx.font = '14px Arial';
-        const textMetrics = ctx.measureText(label);
-        const textHeight = 20;
+          ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+          ctx.fillRect(det.x1, det.y1 - textHeight, textMetrics.width + 8, textHeight);
 
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-        ctx.fillRect(det.x1, det.y1 - textHeight, textMetrics.width + 8, textHeight);
+          ctx.fillStyle = '#000';
+          ctx.fillText(label, det.x1 + 4, det.y1 - 6);
+        });
+      }
+    };
 
-        // Draw label text
-        ctx.fillStyle = '#000';
-        ctx.fillText(label, det.x1 + 4, det.y1 - 6);
-      });
-    }
-  }, [detections, renderDetections]);
+    img.src = lastFrame.startsWith('data:') ? lastFrame : `data:image/jpeg;base64,${lastFrame}`;
+  }, [lastFrame, detections, renderDetections]);
 
-  // Update frame rate if changed
-  useEffect(() => {
-    frameRateLimiterRef.current.setTargetFPS(targetFPS);
-  }, [targetFPS]);
-
-  if (!isVisible) {
-    return null;
-  }
+  if (!isVisible) return null;
 
   return (
     <Box sx={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#000' }}>
-      {/* Hidden video element for camera feed */}
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        style={{ display: 'none' }}
-      />
-
-      {/* Canvas for rendering video + detections */}
       <canvas
         ref={canvasRef}
         style={{
           width: '100%',
           height: '100%',
           objectFit: 'contain',
-          backgroundColor: '#000'
+          backgroundColor: '#000',
+          display: isConnected && lastFrame ? 'block' : 'none'
         }}
       />
 
-      {/* Connection status indicator */}
-      {!isConnected && (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            textAlign: 'center',
-            color: 'white'
-          }}
-        >
-          <Typography variant="body2">Connecting...</Typography>
+      {!isConnected && !error && (
+        <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', color: 'white' }}>
+          <CircularProgress color="primary" size={40} sx={{ mb: 2 }} />
+          <Typography variant="body2">Connecting to camera...</Typography>
+          <Typography variant="caption" sx={{ mt: 1, opacity: 0.7 }}>Camera ID: {cameraId}</Typography>
         </Box>
       )}
 
-      {/* Detection count overlay */}
-      {renderDetections && detections.length > 0 && (
-        <Box
-          sx={{
-            position: 'absolute',
-            bottom: 8,
-            left: 8,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-            color: '#00ff00',
-            padding: '4px 8px',
-            borderRadius: '4px',
-            fontSize: '12px',
-            fontFamily: 'monospace'
-          }}
-        >
+      {isConnected && !lastFrame && !error && (
+        <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', color: 'white' }}>
+          <CircularProgress color="primary" size={40} sx={{ mb: 2 }} />
+          <Typography variant="body2">Waiting for stream...</Typography>
+        </Box>
+      )}
+
+      {error && (
+        <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', color: 'white', maxWidth: '80%' }}>
+          <Typography variant="body2" color="error">{error}</Typography>
+        </Box>
+      )}
+
+      {isConnected && lastFrame && (
+        <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', padding: '4px 8px', borderRadius: '4px' }}>
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#00ff00', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.5 }, '100%': { opacity: 1 } } }} />
+          <Typography variant="caption" color="white">Live</Typography>
+        </Box>
+      )}
+
+      {renderDetections && detections.length > 0 && lastFrame && (
+        <Box sx={{ position: 'absolute', bottom: 8, left: 8, backgroundColor: 'rgba(0, 0, 0, 0.7)', color: '#00ff00', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' }}>
           Detections: {detections.length}
         </Box>
       )}

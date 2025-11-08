@@ -104,7 +104,7 @@ export const useCameraManager = () => {
         // Connect WebSocket for each active camera
         transformedCameras.forEach(camera => {
           if (camera.status === 'online') {
-            connectCameraWebSocket(camera);
+            // connectCameraWebSocket(camera);
           }
         });
       } else {
@@ -138,7 +138,7 @@ export const useCameraManager = () => {
         // Connect WebSocket for new camera
         const newCamera = transformCamera(response.data);
         if (newCamera.status === 'online') {
-          connectCameraWebSocket(newCamera);
+          // connectCameraWebSocket(newCamera);
         }
 
         return response.data;
