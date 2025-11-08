@@ -1,6 +1,6 @@
 import { CameraFeed } from '@features/camera-management/components/CameraFeed.tsx';
 import { useIntersectionObserver } from '@hooks/useIntersectionObserver.ts';
-import { Camera } from '@shared/types';
+import { BackendCamera, Camera } from '@shared/types';
 import React, { useRef, memo } from 'react';
 import { Box } from '@mui/material';
 import { CameraTile } from './CameraTile';
@@ -11,6 +11,7 @@ interface LazyLoadedCameraTileProps {
   darkMode: boolean;
   onClick: (camera: Camera) => void;
   wsUrl: string;
+  handleOpenFeatureConfig: (camera: BackendCamera) => void;
 }
 
 /**
@@ -22,7 +23,8 @@ export const LazyLoadedCameraTile = memo<LazyLoadedCameraTileProps>(({
                                                                        index,
                                                                        darkMode,
                                                                        onClick,
-                                                                       wsUrl
+                                                                       wsUrl,
+  handleOpenFeatureConfig
                                                                      }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(containerRef, {
@@ -32,21 +34,22 @@ export const LazyLoadedCameraTile = memo<LazyLoadedCameraTileProps>(({
 
   return (
     <Box ref={containerRef} sx={{ width: '100%', height: '100%' }}>
-      {isVisible ? (
+      {/* {isVisible ? ( */}
         <CameraFeed
           cameraId={camera.id}
           wsUrl={wsUrl}
           targetFPS={15}
           isVisible={isVisible}
         />
-      ) : (
-        <CameraTile
-          camera={camera}
-          index={index}
-          darkMode={darkMode}
-          onClick={onClick}
-        />
-      )}
+      {/* ) : ( */}
+      {/*   <CameraTile */}
+      {/*     handleOpenFeatureConfig={handleOpenFeatureConfig} */}
+      {/*     camera={camera} */}
+      {/*     index={index} */}
+      {/*     darkMode={darkMode} */}
+      {/*     onClick={onClick} */}
+      {/*   /> */}
+      {/* )} */}
     </Box>
   );
 });

@@ -1,4 +1,3 @@
-
 interface BinaryFrameData {
   cameraId: string;
   timestamp: number;
@@ -29,7 +28,7 @@ export class WebSocketPool {
 
   /**
    * Subscribe to WebSocket connection
-   * Follows FastAPI backend protocol
+   * Supports per-camera URLs: ws://localhost:8000/ws/camera/{camera_id}
    */
   subscribe(
     url: string,
@@ -68,6 +67,12 @@ export class WebSocketPool {
             const handler = connection?.messageHandlers.get(data.camera_id);
             if (handler) {
               handler(data);
+            } else {
+              // Fallback: route to first handler (for single subscriber)
+              const firstHandler = connection?.messageHandlers.values().next().value;
+              if (firstHandler) {
+                firstHandler(data);
+              }
             }
           } else {
             // Broadcast to all subscribers
@@ -136,14 +141,22 @@ export class WebSocketPool {
 
     setTimeout(() => {
       console.log(`[WebSocketPool] Reconnecting to ${url} (attempt ${connection.reconnectAttempts})`);
+
+      // Store handlers for reconnection
+      const handlers = Array.from(connection.messageHandlers.entries());
+
+      // Remove old connection
       this.connections.delete(url);
-      // Subscribers need to re-subscribe
+
+      // Recreate connections for each subscriber
+      handlers.forEach(([subscriberId, handler]) => {
+        this.subscribe(url, subscriberId, handler);
+      });
     }, this.reconnectDelay * connection.reconnectAttempts);
   }
 
   /**
-   * Send binary frame following FastAPI backend protocol
-   * Binary format: [camera_id_length][camera_id][timestamp][image_data]
+   * Send binary frame to specific camera WebSocket
    */
   sendBinaryFrame(url: string, frameData: BinaryFrameData): boolean {
     const connection = this.connections.get(url);
@@ -224,5 +237,29 @@ export class WebSocketPool {
         reconnectAttempts: conn.reconnectAttempts
       }))
     };
+  }
+
+  /**
+   * Close specific connection
+   */
+  closeConnection(url: string): boolean {
+    const connection = this.connections.get(url);
+    if (!connection) return false;
+
+    connection.ws.close();
+    this.connections.delete(url);
+    console.log(`[WebSocketPool] Manually closed connection to ${url}`);
+    return true;
+  }
+
+  /**
+   * Close all connections
+   */
+  closeAll(): void {
+    this.connections.forEach((connection, url) => {
+      connection.ws.close();
+    });
+    this.connections.clear();
+    console.log('[WebSocketPool] All connections closed');
   }
 }

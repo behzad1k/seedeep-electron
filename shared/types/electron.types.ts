@@ -9,6 +9,7 @@ export interface ElectronCameraAPI {
   update: (id: string, updates: any) => Promise<IpcResponse<BackendCamera>>;
   delete: (id: string) => Promise<IpcResponse<void>>;
   calibrate: (id: string, data: any) => Promise<IpcResponse<BackendCamera>>;
+  updateFeatures: (id: string, data: any) => Promise<IpcResponse<BackendCamera>>;
 }
 
 // Detection API Interface

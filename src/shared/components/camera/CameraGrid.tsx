@@ -1,4 +1,4 @@
-import { Camera } from '@shared/types';
+import { BackendCamera, Camera } from '@shared/types';
 import React, { memo, useCallback } from 'react';
 import { Box } from '@mui/material';
 import { CameraTile } from './CameraTile';
@@ -11,6 +11,7 @@ interface CameraGridProps {
   onCameraClick: (camera: Camera) => void;
   onAddCamera: () => void;
   renderCamera?: (camera: Camera, index: number) => React.ReactNode;
+  handleOpenFeatureConfig: (camera: BackendCamera) => void;
 }
 
 export const CameraGrid = memo<CameraGridProps>(({
@@ -19,7 +20,8 @@ export const CameraGrid = memo<CameraGridProps>(({
                                                    darkMode,
                                                    onCameraClick,
                                                    onAddCamera,
-                                                   renderCamera
+                                                   renderCamera,
+  handleOpenFeatureConfig,
                                                  }) => {
   const getGridColumns = useCallback(() => {
     switch (gridSize) {
@@ -59,6 +61,7 @@ export const CameraGrid = memo<CameraGridProps>(({
           renderCamera ?
             renderCamera(camera, index) :
             <CameraTile
+              handleOpenFeatureConfig={handleOpenFeatureConfig}
               key={camera.id}
               camera={camera}
               index={index}

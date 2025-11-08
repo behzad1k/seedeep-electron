@@ -1,3 +1,5 @@
+import { BackendCameraFeatures } from '@shared/types/backend.types.ts';
+
 export interface Camera {
   id: string;
   name: string;
@@ -50,7 +52,7 @@ export interface Camera {
   lastSeen?: string;
   width?: string
   height?: string
-
+  features: BackendCameraFeatures
 }
 
 export interface CameraFormData {

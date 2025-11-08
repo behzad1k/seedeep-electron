@@ -1,20 +1,22 @@
-import { Camera } from '@shared/types';
+import { BackendCamera, Camera } from '@shared/types';
 import React, { memo, useCallback } from 'react';
-import { Box, Typography } from '@mui/material';
-import { Videocam } from '@mui/icons-material';
+import { Box, IconButton, Typography } from '@mui/material';
+import { Settings, Videocam } from '@mui/icons-material';
 
 interface CameraTileProps {
   camera: Camera;
   index: number;
   darkMode: boolean;
   onClick: (camera: Camera) => void;
+  handleOpenFeatureConfig: (camera: BackendCamera) => void;
 }
 
 export const CameraTile = memo<CameraTileProps>(({
                                                    camera,
                                                    index,
                                                    darkMode,
-                                                   onClick
+                                                   onClick,
+                                                    handleOpenFeatureConfig,
                                                  }) => {
   const handleClick = useCallback(() => {
     onClick(camera);
@@ -80,6 +82,15 @@ export const CameraTile = memo<CameraTileProps>(({
           }),
         }}
       />
+      <IconButton
+        onClick={(e) => {
+          e.stopPropagation();
+          handleOpenFeatureConfig(camera as any);
+        }}
+        sx={{ position: 'absolute', zIndex: 4, color: 'white', bottom: 0, right: 0 }}
+      >
+        <Settings />
+      </IconButton>
 
       {/* Camera Feed Area */}
       <Box

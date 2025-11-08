@@ -264,38 +264,34 @@ const AddCamera: React.FC<AddCameraProps> = ({
 
   const handleSubmit = async () => {
     try {
-      const cameraData = {
-        name: formData.name,
-        location: formData.location,
-        description: formData.description,
-        rtsp_url: formData.streamUrl,
-        width: parseInt(formData.resolution.split('x')[0]),
-        height: parseInt(formData.resolution.split('x')[1]),
-        fps: formData.fps,
-        features: {
-          detection: formData.enableAI,
-          tracking: formData.trackingEnabled,
-          speed: formData.trackingEnabled && formData.calibrationEnabled,
-          counting: false,
-        },
-        active_models: formData.selectedModels,
-      };
-
-      const response = await fetch('http://localhost:8000/cameras', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cameraData),
-      });
-
-      if (response.ok) {
-        const newCamera = await response.json();
-        if (onSubmit) onSubmit(newCamera);
-        alert('Camera added successfully!');
-        onClose?.();
-      } else {
-        const error = await response.json();
-        alert(`Failed to add camera: ${error.detail || 'Unknown error'}`);
-      }
+      // const newCamera = {
+      //   name: "Parking Lot Camera",
+      //   location: "North Entrance",
+      //   rtsp_url: "rtsp://camera-ip:554/stream",
+      //   width: 1920,
+      //   height: 1080,
+      //   fps: 30,
+      //   active_models: ["ppe_detection", "general_detection"],
+      //   features: {
+      //     detection: true,
+      //     tracking: true,
+      //     speed: true,
+      //     distance: true,
+      //   },
+      //   calibration: {
+      //     mode: "reference_object",
+      //     points: [
+      //       { pixel_x: 100, pixel_y: 200, real_x: 0, real_y: 0 },
+      //       { pixel_x: 500, pixel_y: 200, real_x: 2.0, real_y: 0 }
+      //     ],
+      //     reference_width_meters: 2.0
+      //   }
+      // };
+      //
+      // await createCamera(newCamera);
+      console.log('ff', formData);
+      onSubmit && await onSubmit(formData);
+      onClose && onClose();
     } catch (error) {
       console.error('Error adding camera:', error);
       alert('Failed to add camera');
@@ -994,7 +990,7 @@ const AddCamera: React.FC<AddCameraProps> = ({
           ))}
         </Stepper>
 
-        <Box sx={{ minHeight: 400, mb: 3 }}>
+        <Box sx={{ height: 400, mb: 3, overflow: 'auto'}}>
           {renderStepContent()}
         </Box>
 

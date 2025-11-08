@@ -81,5 +81,18 @@ export function registerCameraHandlers() {
     }
   );
 
+  // Update camera features
+  ipcMain.handle(
+    IpcChannels.CAMERA_UPDATE_FEATURES,
+    async (_, { cameraId, features }: { cameraId: string; features: any }): Promise<IpcResponse<BackendCamera>> => {
+      const response = await backendAPI.updateCameraFeatures(cameraId, features);
+      return {
+        success: response.success,
+        data: response.data,
+        error: response.error
+      };
+    }
+  );
+
   console.log('[IPC] Camera handlers registered');
 }

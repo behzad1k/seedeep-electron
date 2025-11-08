@@ -7,6 +7,7 @@ export enum IpcChannels {
   CAMERA_UPDATE = 'camera:update',
   CAMERA_DELETE = 'camera:delete',
   CAMERA_CALIBRATE = 'camera:calibrate',
+  CAMERA_UPDATE_FEATURES = 'camera:updateFeatures',
 
   // Detection
   DETECTION_START = 'detection:start',

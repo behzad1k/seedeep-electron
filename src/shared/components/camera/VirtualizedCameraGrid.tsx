@@ -1,4 +1,4 @@
-import { Camera } from '@shared/types';
+import { BackendCamera, Camera } from '@shared/types';
 import React, { memo, useCallback, useRef, useEffect, useState } from 'react';
 import { Box } from '@mui/material';
 import { CameraTile } from './CameraTile';
@@ -10,6 +10,7 @@ interface VirtualizedCameraGridProps {
   darkMode: boolean;
   onCameraClick: (camera: Camera) => void;
   onAddCamera: () => void;
+  handleOpenFeatureConfig: (camera: BackendCamera) => void;
 }
 
 /**
@@ -21,7 +22,8 @@ export const VirtualizedCameraGrid = memo<VirtualizedCameraGridProps>(({
                                                                          gridSize,
                                                                          darkMode,
                                                                          onCameraClick,
-                                                                         onAddCamera
+                                                                         onAddCamera,
+  handleOpenFeatureConfig,
                                                                        }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 20 });
@@ -94,6 +96,7 @@ export const VirtualizedCameraGrid = memo<VirtualizedCameraGridProps>(({
       >
         {displayCameras.map((camera, index) => (
           <CameraTile
+            handleOpenFeatureConfig={handleOpenFeatureConfig}
             key={camera.id}
             camera={camera}
             index={visibleRange.start + index}

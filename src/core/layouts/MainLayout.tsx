@@ -1,11 +1,18 @@
 import { CameraGrid } from '@components/camera/CameraGrid.tsx';
 import { VirtualizedCameraGrid } from '@components/camera/VirtualizedCameraGrid.tsx';
+import { AppHeader } from '@components/layout/AppHeader.tsx';
+import { AppSidebar } from '@components/layout/AppSidebar.tsx';
 import { BackendHealthIndicator } from '@components/layout/BackendHealthIndicator.tsx';
+import AddCamera from '@features/camera-management/components/AddCamera.tsx';
+import { CameraFeed } from '@features/camera-management/components/CameraFeed.tsx';
+import { FeatureConfigSidebar } from '@features/camera-management/components/FeatureConfigSidebar.tsx';
 import FullScreenCameraView from '@features/camera-management/components/FullScreenCameraView.tsx';
 import { useCameraManager } from '@features/camera-management/hooks/useCameraManager.ts';
 import { useMemoryOptimization } from '@hooks/useMemoryOptimization.ts';
+import { BackendCamera } from '@shared/types';
+import { MODEL_DEFINITIONS } from '@utils/models/modelDefinitions.ts';
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Alert, CircularProgress } from '@mui/material';
+import { Box, Alert, CircularProgress, Modal } from '@mui/material';
 
 const MainLayout: React.FC = () => {
   // State
@@ -14,6 +21,8 @@ const MainLayout: React.FC = () => {
   const [addCameraOpen, setAddCameraOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [featureConfigOpen, setFeatureConfigOpen] = useState(false);
+  const [configCamera, setConfigCamera] = useState<BackendCamera | null>(null);
 
   // Backend integration
   const {
@@ -24,7 +33,7 @@ const MainLayout: React.FC = () => {
     error,
     setSelectedCamera,
     setFullScreenCamera,
-    updateCameraModel,
+    updateCameraFeatures,
     createCamera,
     fetchCameras
   } = useCameraManager();
@@ -59,6 +68,16 @@ const MainLayout: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [fetchCameras]);
+
+  const handleOpenFeatureConfig = (camera: BackendCamera) => {
+    setConfigCamera(camera);
+    setFeatureConfigOpen(true);
+  };
+
+
+  const handleSaveFeatures = async (cameraId: string, features: any) => {
+    await updateCameraFeatures(cameraId, features);
+  };
 
   // Render content
   const renderContent = () => {
@@ -96,10 +115,16 @@ const MainLayout: React.FC = () => {
 
       return (
         <GridComponent
+          renderCamera={(camera) => <CameraFeed
+            cameraId={camera.id}
+            targetFPS={15}
+            isVisible={true}
+          />}
           cameras={cameras}
           gridSize={gridSize}
           darkMode={darkMode}
           onCameraClick={handleCameraClick}
+          handleOpenFeatureConfig={handleOpenFeatureConfig}
           onAddCamera={() => setAddCameraOpen(true)}
         />
       );
@@ -109,12 +134,23 @@ const MainLayout: React.FC = () => {
   };
 
   return (
-    <>
+    <Box sx={{ paddingLeft: 7}}>
+      <Modal open={addCameraOpen}
+             onClose={() => setAddCameraOpen(false)}>
+          <AddCamera onClose={() => setAddCameraOpen(false)} onSubmit={createCamera} availableModels={Object.values(MODEL_DEFINITIONS).map(e => ({ name: e.name, classes: e.classes}))}/>
+      </Modal>
+      {/* {addCameraOpen && */}
+      {/*   <AddCamera onClose={() => setAddCameraOpen(false)} onSubmit={createCamera} availableModels={Object.values(MODEL_DEFINITIONS).map(e => ({ name: e.name, classes: e.classes}))}/> */}
+      {/* } */}
+      <AppHeader title={'SeeDeep'} cameras={[]} gridSize={'4x4'} onGridSizeChange={(size ) => setGridSize(size)} onAddCamera={() => setAddCameraOpen(true)} showCameraControls={true}/>
+
       <Box sx={{ display: 'flex', height: '100vh' }}>
         {/* Sidebar, Header, Content... */}
-        {renderContent()}
-      </Box>
 
+        {renderContent()}
+
+      </Box>
+      <AppSidebar open={rightSidebarOpen} hovered={false} activeTab={activeTab} darkMode={darkMode} items={[]} onToggle={() => setRightSidebarOpen(!rightSidebarOpen)} onMouseEnter={() => {} } onMouseLeave={() => {}} onTabChange={() => {}} onThemeToggle={() => setDarkMode(!darkMode) } />
       {/* Backend Health Indicator */}
       <BackendHealthIndicator position="top-right" />
 
@@ -127,7 +163,14 @@ const MainLayout: React.FC = () => {
           {memoryStatus.recommendedAction}
         </Alert>
       )}
-    </>
+      <FeatureConfigSidebar
+        open={featureConfigOpen}
+        camera={configCamera}
+        darkMode={darkMode}
+        onClose={() => setFeatureConfigOpen(false)}
+        onSave={handleSaveFeatures}
+      />
+    </Box>
   );
 };
 

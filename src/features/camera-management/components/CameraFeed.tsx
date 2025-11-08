@@ -51,6 +51,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
   // Handle WebSocket messages from backend
   const handleMessage = useCallback((data: any) => {
+    console.log(isActiveRef.current, isVisible, data.camera_id !== cameraId.toString());
     if (!isActiveRef.current || !isVisible) return;
 
     // Check if this message is for our camera

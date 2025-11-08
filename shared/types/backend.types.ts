@@ -10,8 +10,12 @@ export type BackendCameraFeature = 'detection' | 'tracking' | 'speed' | 'countin
 export interface BackendCameraFeatures {
   detection: boolean;
   tracking: boolean;
+  distance: boolean;
   speed: boolean;
   counting: boolean;
+  tracking_classes: string[]
+  speed_classes: string[]
+  distance_classes: string[]
 }
 
 export interface BackendCamera {

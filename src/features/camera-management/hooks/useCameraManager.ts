@@ -1,6 +1,6 @@
-import { DetectionModelKey, Camera, IpcResponse, BackendCamera } from '@shared/types';
-import { MemoryMonitor } from '@utils/performance/MemoryMonitor';
-import { useState, useCallback, useEffect } from 'react';
+import { BackendCamera, Camera, IpcResponse } from '@shared/types';
+import { WebSocketPool } from '@utils/websocket/WebsocketPool';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 export const useCameraManager = () => {
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -9,27 +9,14 @@ export const useCameraManager = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Check if Electron API is available
+  // Track WebSocket connections per camera
+  const wsConnectionsRef = useRef<Map<string, () => void>>(new Map());
   const isElectron = typeof window !== 'undefined' && window.electronAPI;
-
-  // Fetch cameras from backend on mount
-  useEffect(() => {
-    fetchCameras();
-  }, []);
-
-  // Update memory monitor with camera count
-  useEffect(() => {
-    const monitor = MemoryMonitor.getInstance();
-    monitor.updateResourceCounts({
-      cameras: cameras.length,
-      connections: cameras.filter(c => c.status !== 'offline').length
-    });
-  }, [cameras]);
 
   /**
    * Transform backend camera to frontend format
    */
-  const transformCamera = (cam: BackendCamera): Camera => ({
+  const transformCamera = useCallback((cam: BackendCamera): Camera => ({
     id: cam.id,
     name: cam.name,
     status: cam.is_active ? 'online' : 'offline' as 'online' | 'offline' | 'recording',
@@ -47,8 +34,52 @@ export const useCameraManager = () => {
     },
     isCalibrated: cam.is_calibrated,
     pixelsPerMeter: cam.pixels_per_meter,
-    calibrationMode: cam.calibration_mode
-  });
+    calibrationMode: cam.calibration_mode,
+    // Enhanced features
+    features: cam.features || {},
+  }), []);
+
+  /**
+   * Connect camera to WebSocket
+   */
+  const connectCameraWebSocket = useCallback((camera: Camera) => {
+    const wsUrl = `ws://localhost:8000/ws/camera/${camera.id}`;
+    const pool = WebSocketPool.getInstance();
+
+    // Unsubscribe if already connected
+    const existingUnsubscribe = wsConnectionsRef.current.get(camera.id);
+    if (existingUnsubscribe) {
+      existingUnsubscribe();
+    }
+
+    // Subscribe to camera's WebSocket
+    const unsubscribe = pool.subscribe(
+      wsUrl,
+      camera.id,
+      (data: any) => {
+        console.log(`[Camera ${camera.id}] Received data:`, data);
+        // Handle incoming data - update UI, trigger events, etc.
+      },
+      (error: any) => {
+        console.error(`[Camera ${camera.id}] WebSocket error:`, error);
+      }
+    );
+
+    wsConnectionsRef.current.set(camera.id, unsubscribe);
+    console.log(`✅ Connected WebSocket for camera ${camera.id}`);
+  }, []);
+
+  /**
+   * Disconnect camera from WebSocket
+   */
+  const disconnectCameraWebSocket = useCallback((cameraId: string) => {
+    const unsubscribe = wsConnectionsRef.current.get(cameraId);
+    if (unsubscribe) {
+      unsubscribe();
+      wsConnectionsRef.current.delete(cameraId);
+      console.log(`🔴 Disconnected WebSocket for camera ${cameraId}`);
+    }
+  }, []);
 
   /**
    * Fetch all cameras from backend
@@ -69,6 +100,13 @@ export const useCameraManager = () => {
       if (response.success && response.data) {
         const transformedCameras = response.data.map(transformCamera);
         setCameras(transformedCameras);
+
+        // Connect WebSocket for each active camera
+        transformedCameras.forEach(camera => {
+          if (camera.status === 'online') {
+            connectCameraWebSocket(camera);
+          }
+        });
       } else {
         setError(response.error || 'Failed to fetch cameras');
         console.error('Failed to fetch cameras:', response.error);
@@ -80,7 +118,7 @@ export const useCameraManager = () => {
     } finally {
       setLoading(false);
     }
-  }, [isElectron]);
+  }, [isElectron, transformCamera, connectCameraWebSocket]);
 
   /**
    * Create a new camera
@@ -92,24 +130,17 @@ export const useCameraManager = () => {
     }
 
     try {
-      const response: IpcResponse<BackendCamera> = await window.electronAPI.camera.create({
-        name: cameraData.name,
-        location: cameraData.location,
-        rtsp_url: cameraData.rtsp_url,
-        width: parseInt(cameraData.width) || 640,
-        height: parseInt(cameraData.height) || 480,
-        fps: parseInt(cameraData.fps) || 30,
-        features: cameraData.features || {
-          detection: true,
-          tracking: false,
-          speed: false,
-          counting: false
-        },
-        active_models: cameraData.active_models || []
-      });
+      const response: IpcResponse<BackendCamera> = await window.electronAPI.camera.create(cameraData);
 
       if (response.success && response.data) {
         await fetchCameras();
+
+        // Connect WebSocket for new camera
+        const newCamera = transformCamera(response.data);
+        if (newCamera.status === 'online') {
+          connectCameraWebSocket(newCamera);
+        }
+
         return response.data;
       } else {
         console.error('Failed to create camera:', response.error);
@@ -119,88 +150,35 @@ export const useCameraManager = () => {
       console.error('Error creating camera:', err);
       return null;
     }
-  }, [isElectron, fetchCameras]);
+  }, [isElectron, fetchCameras, transformCamera, connectCameraWebSocket]);
 
   /**
-   * Update camera model settings
+   * Update camera features
    */
-  const updateCameraModel = useCallback(async (
-    cameraId: number | string,
-    model: DetectionModelKey
-  ) => {
+  const updateCameraFeatures = useCallback(async (cameraId: string, features: any) => {
     if (!isElectron) {
       console.error('Electron API not available');
-      return;
+      return null;
     }
-
-    const camera = cameras.find(c => c.id === cameraId);
-    if (!camera) return;
-
-    const currentModels = camera.detectionModels || {
-      ppeDetection: false,
-      personDetection: false,
-      generalDetection: false,
-      fireDetection: false,
-      weaponDetection: false,
-    };
-    const modelMapping: Record<DetectionModelKey, string> = {
-      ppeDetection: 'ppe_detection',
-      personDetection: 'person_detection',
-      generalDetection: 'general_detection',
-      fireDetection: 'fire_detection',
-      weaponDetection: 'weapon_detection'
-    };
-
-    const backendModelName = modelMapping[model];
-
-    const currentBackendModels = Object.entries(currentModels)
-    .filter(([_, enabled]) => enabled)
-    .map(([key, _]) => modelMapping[key as DetectionModelKey])
-    .filter(Boolean);
-
-    const newModels = currentModels[model]
-      ? currentBackendModels.filter(m => m !== backendModelName)
-      : [...currentBackendModels, backendModelName];
 
     try {
-      const response: IpcResponse<BackendCamera> = await window.electronAPI.camera.update(
-        cameraId.toString(),
-        { active_models: newModels }
+      const response: IpcResponse<BackendCamera> = await window.electronAPI.camera.updateFeatures(
+        cameraId,
+        features
       );
 
-      if (response.success) {
-        // Update local state optimistically
-        const updatedDetectionModels = {
-          ...currentModels,
-          [model]: !currentModels[model]
-        };
-
-        setCameras(prev => prev.map(cam =>
-          cam.id === cameraId
-            ? { ...cam, detectionModels: updatedDetectionModels }
-            : cam
-        ));
-
-        if (selectedCamera?.id === cameraId) {
-          setSelectedCamera(prev => prev
-            ? { ...prev, detectionModels: updatedDetectionModels }
-            : null
-          );
-        }
-
-        if (fullScreenCamera?.id === cameraId) {
-          setFullScreenCamera(prev => prev
-            ? { ...prev, detectionModels: updatedDetectionModels }
-            : null
-          );
-        }
+      if (response.success && response.data) {
+        await fetchCameras();
+        return response.data;
       } else {
-        console.error('Failed to update camera:', response.error);
+        console.error('Failed to update camera features:', response.error);
+        return null;
       }
     } catch (err) {
-      console.error('Error updating camera model:', err);
+      console.error('Error updating camera features:', err);
+      return null;
     }
-  }, [cameras, selectedCamera, fullScreenCamera, isElectron]);
+  }, [isElectron, fetchCameras]);
 
   /**
    * Delete a camera
@@ -212,6 +190,9 @@ export const useCameraManager = () => {
     }
 
     try {
+      // Disconnect WebSocket first
+      disconnectCameraWebSocket(cameraId);
+
       const response: IpcResponse<void> = await window.electronAPI.camera.delete(cameraId);
 
       if (response.success) {
@@ -225,7 +206,7 @@ export const useCameraManager = () => {
       console.error('Error deleting camera:', err);
       return false;
     }
-  }, [isElectron, fetchCameras]);
+  }, [isElectron, fetchCameras, disconnectCameraWebSocket]);
 
   /**
    * Calibrate a camera
@@ -258,6 +239,21 @@ export const useCameraManager = () => {
     }
   }, [isElectron, fetchCameras]);
 
+  // Initial fetch
+  useEffect(() => {
+    fetchCameras();
+  }, [fetchCameras]);
+
+  // Cleanup WebSocket connections on unmount
+  useEffect(() => {
+    return () => {
+      wsConnectionsRef.current.forEach((unsubscribe) => {
+        unsubscribe();
+      });
+      wsConnectionsRef.current.clear();
+    };
+  }, []);
+
   return {
     cameras,
     selectedCamera,
@@ -267,10 +263,12 @@ export const useCameraManager = () => {
     setCameras,
     setSelectedCamera,
     setFullScreenCamera,
-    updateCameraModel,
     fetchCameras,
     createCamera,
+    updateCameraFeatures,
     deleteCamera,
-    calibrateCamera
+    calibrateCamera,
+    connectCameraWebSocket,
+    disconnectCameraWebSocket,
   };
 };
