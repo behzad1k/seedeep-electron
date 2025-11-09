@@ -24,6 +24,7 @@ export class ClassModelMapper {
     }));
   }
 
+
   static validateClasses(selectedClasses: string[]): {
     valid: string[];
     invalid: string[];

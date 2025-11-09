@@ -11,7 +11,7 @@ interface WSConnection {
     onError: (error: any) => void;
   }>;
   reconnectAttempts: number;
-  reconnectTimer: NodeJS.Timeout | null;
+  reconnectTimer: any | null;
   isConnecting: boolean;
 }
 

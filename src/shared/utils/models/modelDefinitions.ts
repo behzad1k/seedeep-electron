@@ -2,7 +2,7 @@ export interface ModelDefinition {
   name: string;
   classes: string[];
   description: string;
-  category: 'safety' | 'detection' | 'recognition';
+  category: string;
   modelSize: 'nano' | 'small' | 'medium' | 'large';
   estimatedRAM: string;
 }
@@ -12,7 +12,7 @@ export const MODEL_DEFINITIONS: Record<string, ModelDefinition> = {
     name: 'PPE',
     classes: ['Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest', 'Person', 'Safety Cone', 'Safety Vest', 'Machinery', 'General'],
     description: 'Personal Protective Equipment detection',
-    category: 'safety',
+    category: 'PPE',
     modelSize: 'nano',
     estimatedRAM: '12MB'
   },
@@ -20,7 +20,7 @@ export const MODEL_DEFINITIONS: Record<string, ModelDefinition> = {
     name: 'Facemask',
     classes: ['no_mask', 'mask'],
     description: 'Face mask detection and compliance',
-    category: 'safety',
+    category: 'Face Mask',
     modelSize: 'nano',
     estimatedRAM: '8MB'
   },
@@ -28,7 +28,7 @@ export const MODEL_DEFINITIONS: Record<string, ModelDefinition> = {
     name: 'Cap',
     classes: ['no_cap', 'cap'],
     description: 'Head protection detection',
-    category: 'safety',
+    category: 'Cap',
     modelSize: 'nano',
     estimatedRAM: '10MB'
   },
@@ -36,7 +36,7 @@ export const MODEL_DEFINITIONS: Record<string, ModelDefinition> = {
     name: 'Weapon',
     classes: ['pistol', 'knife'],
     description: 'Weapon detection and classification',
-    category: 'safety',
+    category: 'Weapon',
     modelSize: 'nano',
     estimatedRAM: '15MB'
   },
@@ -44,7 +44,7 @@ export const MODEL_DEFINITIONS: Record<string, ModelDefinition> = {
     name: 'Person',
     classes: ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'],
     description: 'Person detection and basic classification',
-    category: 'detection',
+    category: 'General',
     modelSize: 'nano',
     estimatedRAM: '12MB'
   },
@@ -52,7 +52,7 @@ export const MODEL_DEFINITIONS: Record<string, ModelDefinition> = {
     name: 'Fire_Safety',
     classes: ['smoke', 'fire'],
     description: 'Fire and safety equipment detection',
-    category: 'safety',
+    category: 'Fire/Smoke',
     modelSize: 'nano',
     estimatedRAM: '14MB'
   },
