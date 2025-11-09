@@ -34,17 +34,33 @@ export const CameraFeed = memo<CameraFeedProps>(({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const isActiveRef = useRef(true);
+  const frameCountRef = useRef(0);
+  const mountedRef = useRef(true);
 
   const [detections, setDetections] = useState<DetectionBox[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [lastFrame, setLastFrame] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Normalize camera ID to string for consistent comparison
+  const normalizedCameraId = String(cameraId);
+
   // Handle WebSocket messages from backend
   const handleMessage = useCallback((data: any) => {
-    if (!isActiveRef.current || !isVisible) return;
+    if (!isActiveRef.current || !mountedRef.current || !isVisible) return;
 
-    if (data.camera_id && data.camera_id !== cameraId.toString()) return;
+    // Check camera ID match (normalize both sides)
+    if (data.camera_id && String(data.camera_id) !== normalizedCameraId) {
+      console.warn('[CameraFeed] Camera ID mismatch:', data.camera_id, 'vs', normalizedCameraId);
+      return;
+    }
+
+    frameCountRef.current++;
+
+    // Log every 30 frames (roughly every 2 seconds at 15fps)
+    if (frameCountRef.current % 30 === 0) {
+      console.log(`[CameraFeed ${normalizedCameraId}] Received ${frameCountRef.current} frames`);
+    }
 
     setIsConnected(true);
     setError(null);
@@ -76,37 +92,59 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
       setDetections(allDetections);
     }
-  }, [isVisible, cameraId, onFrame, renderDetections]);
+  }, [isVisible, normalizedCameraId, onFrame, renderDetections]);
 
   // Initialize WebSocket connection
   useEffect(() => {
-    if (!isVisible) return;
+    if (!isVisible) {
+      console.log(`[CameraFeed ${normalizedCameraId}] Not visible, skipping connection`);
+      return;
+    }
+
+    // Prevent duplicate subscriptions
+    if (unsubscribeRef.current) {
+      console.log(`[CameraFeed ${normalizedCameraId}] Already subscribed, skipping`);
+      return;
+    }
+
+    mountedRef.current = true;
+    isActiveRef.current = true;
 
     const pool = WebSocketPool.getInstance();
-    const cameraWsUrl = `${wsUrl.replace(/\/ws$/, '')}/ws/camera/${cameraId}`;
+    const cameraWsUrl = `${wsUrl.replace(/\/ws$/, '')}/ws/camera/${normalizedCameraId}`;
 
-    console.log('[CameraFeed] Connecting to:', cameraWsUrl);
+    console.log(`[CameraFeed ${normalizedCameraId}] Connecting to:`, cameraWsUrl);
 
-    unsubscribeRef.current = pool.subscribe(
-      cameraWsUrl,
-      cameraId.toString(),
-      handleMessage,
-      (err) => {
-        console.error('[CameraFeed] WebSocket error:', err);
-        setIsConnected(false);
-        setError('Connection error');
-        onError?.(err);
-      }
-    );
+    // Add a small delay to prevent race conditions
+    const timeoutId = setTimeout(() => {
+      if (!mountedRef.current) return;
+
+      unsubscribeRef.current = pool.subscribe(
+        cameraWsUrl,
+        normalizedCameraId,
+        handleMessage,
+        (err) => {
+          if (!mountedRef.current) return;
+          console.error(`[CameraFeed ${normalizedCameraId}] WebSocket error:`, err);
+          setIsConnected(false);
+          setError('Connection error');
+          onError?.(err);
+        }
+      );
+    }, 100);
 
     return () => {
+      console.log(`[CameraFeed ${normalizedCameraId}] Cleanup: unsubscribing`);
+      clearTimeout(timeoutId);
+      mountedRef.current = false;
       isActiveRef.current = false;
+
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
     };
-  }, [cameraId, wsUrl, isVisible, handleMessage, onError]);
+  }, [normalizedCameraId, wsUrl, isVisible, handleMessage, onError]);
 
   // Draw frame and detections on canvas
   useEffect(() => {
@@ -118,11 +156,13 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
     const img = new Image();
     img.onload = () => {
+      if (!mountedRef.current) return;
+
       canvas.width = img.width;
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
 
-      if (renderDetections) {
+      if (renderDetections && detections.length > 0) {
         detections.forEach((det) => {
           ctx.strokeStyle = '#00ff00';
           ctx.lineWidth = 2;
@@ -164,7 +204,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
         <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', color: 'white' }}>
           <CircularProgress color="primary" size={40} sx={{ mb: 2 }} />
           <Typography variant="body2">Connecting to camera...</Typography>
-          <Typography variant="caption" sx={{ mt: 1, opacity: 0.7 }}>Camera ID: {cameraId}</Typography>
+          <Typography variant="caption" sx={{ mt: 1, opacity: 0.7 }}>Camera ID: {normalizedCameraId}</Typography>
         </Box>
       )}
 
@@ -172,6 +212,9 @@ export const CameraFeed = memo<CameraFeedProps>(({
         <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', color: 'white' }}>
           <CircularProgress color="primary" size={40} sx={{ mb: 2 }} />
           <Typography variant="body2">Waiting for stream...</Typography>
+          <Typography variant="caption" sx={{ mt: 1, opacity: 0.7 }}>
+            Frame count: {frameCountRef.current}
+          </Typography>
         </Box>
       )}
 
