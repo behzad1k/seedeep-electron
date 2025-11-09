@@ -27,8 +27,8 @@ export const useCameraManager = () => {
     fps: cam.fps?.toString() || '30',
     detectionModels: {
       ppeDetection: cam.active_models?.includes('ppe_detection') || false,
-      personDetection: cam.active_models?.includes('person_detection') || false,
       generalDetection: cam.active_models?.includes('general_detection') || false,
+      capDetection: cam.active_models?.includes('cap_detection') || false,
       fireDetection: cam.active_models?.includes('fire_detection') || false,
       weaponDetection: cam.active_models?.includes('weapon_detection') || false,
     },
@@ -99,6 +99,7 @@ export const useCameraManager = () => {
 
       if (response.success && response.data) {
         const transformedCameras = response.data.map(transformCamera);
+        console.log(response.data, transformedCameras);
         setCameras(transformedCameras);
 
         // Connect WebSocket for each active camera

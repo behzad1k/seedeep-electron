@@ -7,7 +7,6 @@
 export const MODEL_NAME_MAP = {
   // Frontend -> Backend
   ppeDetection: 'ppe_detection',
-  personDetection: 'person_detection',
   vehicleDetection: 'vehicle_detection',
   fireDetection: 'fire_detection',
   weaponDetection: 'weapon_detection',
@@ -19,7 +18,6 @@ export const MODEL_NAME_MAP = {
 // Backend -> Frontend
 export const BACKEND_MODEL_MAP = {
   ppe_detection: 'ppeDetection',
-  person_detection: 'personDetection',
   vehicle_detection: 'vehicleDetection',
   fire_detection: 'fireDetection',
   weapon_detection: 'weaponDetection',

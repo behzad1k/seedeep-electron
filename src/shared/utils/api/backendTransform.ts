@@ -5,29 +5,6 @@ import { MODEL_NAME_MAP, BACKEND_MODEL_MAP } from '@core/config/backend';
 /**
  * Transform backend camera to frontend camera type
  */
-export function transformBackendCamera(backendCamera: BackendCamera): Camera {
-  return {
-    id: backendCamera.id,
-    name: backendCamera.name,
-    status: backendCamera.is_active ? 'online' : 'offline',
-    location: backendCamera.location || '',
-    rtsp_url: backendCamera.rtsp_url || undefined,
-    width: backendCamera.width.toString(),
-    height: backendCamera.height.toString(),
-    fps: backendCamera.fps.toString(),
-    detectionModels: {
-      ppeDetection: backendCamera.active_models?.includes('ppe_detection') || false,
-      personDetection: backendCamera.active_models?.includes('person_detection') || false,
-      generalDetection: backendCamera.active_models?.includes('general_detection') || false,
-      fireDetection: backendCamera.active_models?.includes('fire_detection') || false,
-      weaponDetection: backendCamera.active_models?.includes('weapon_detection') || false,
-    },
-    // Additional backend fields
-    isCalibrated: backendCamera.is_calibrated,
-    pixelsPerMeter: backendCamera.pixels_per_meter,
-    calibrationMode: backendCamera.calibration_mode,
-  };
-}
 
 /**
  * Transform frontend camera data to backend format

@@ -10,7 +10,8 @@ import { useMemoryOptimization } from '@hooks/useMemoryOptimization.ts';
 import { useTheme } from '@/contexts/ThemeContext';
 import { BackendCamera } from '@shared/types';
 import React, { useState, useCallback } from 'react';
-import { Box, Alert, CircularProgress, Modal, Paper } from '@mui/material';
+import { Box, Alert, CircularProgress, Modal, Paper, IconButton } from '@mui/material';
+import { Close } from '@mui/icons-material';
 
 const MainLayout: React.FC = () => {
   const { darkMode, toggleTheme } = useTheme();
@@ -37,10 +38,17 @@ const MainLayout: React.FC = () => {
   });
 
   const handleCameraClick = useCallback((camera: any) => {
-    setExpandedCamera(camera);
-    setSelectedCamera(camera);
-    setRightSidebarOpen(true);
-  }, [setSelectedCamera]);
+    if (expandedCamera?.id === camera.id) {
+      // Clicking the same camera - collapse it
+      setExpandedCamera(null);
+      setRightSidebarOpen(false);
+    } else {
+      // Clicking a different camera - expand it
+      setExpandedCamera(camera);
+      setSelectedCamera(camera);
+      setRightSidebarOpen(true);
+    }
+  }, [expandedCamera, setSelectedCamera]);
 
   const handleCloseSidebar = useCallback(() => {
     setRightSidebarOpen(false);
@@ -48,8 +56,31 @@ const MainLayout: React.FC = () => {
   }, []);
 
   const handleUpdate = useCallback(async (cameraId: string, updates: any) => {
-    await window.electronAPI.camera.update(cameraId, updates);
-  }, []);
+    // Preserve active_models when updating
+    const currentCamera = cameras.find(c => c.id === cameraId);
+
+    const updatePayload = {
+      ...updates,
+      // Preserve active_models if not explicitly being updated
+      active_models: updates.active_models || currentCamera?.detectionModels
+        ? Object.entries(currentCamera?.detectionModels || {})
+        .filter(([_, enabled]) => enabled)
+        .map(([key]) => {
+          // Convert frontend keys to backend model names
+          const modelMap: Record<string, string> = {
+            'ppeDetection': 'ppe_detection',
+            'personDetection': 'person_detection',
+            'generalDetection': 'general_detection',
+            'fireDetection': 'fire_detection',
+            'weaponDetection': 'weapon_detection'
+          };
+          return modelMap[key] || key;
+        })
+        : []
+    };
+
+    await window.electronAPI.camera.update(cameraId, updatePayload);
+  }, [cameras]);
 
   const handleDelete = useCallback(async (cameraId: string) => {
     await deleteCamera(cameraId);
@@ -83,91 +114,128 @@ const MainLayout: React.FC = () => {
           height: 'calc(100vh - 80px)',
           position: 'relative'
         }}>
-          {/* Camera Grid Container */}
+          {/* Camera Grid Container - FIXED: Proper sizing */}
           <Box sx={{
-            flex: expandedCamera ? '0 0 calc(100% - 450px)' : '1',
-            transition: 'flex 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            overflow: 'hidden',
-            position: 'relative'
+            width: expandedCamera ? 'calc(100% - 450px)' : '100%',
+            height: '100%',
+            transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            position: 'relative',
+            zIndex: 1 // FIXED: Below sidebar
           }}>
             <CameraGrid
-              renderCamera={(camera, index) => (
-                <Paper
-                  elevation={expandedCamera?.id === camera.id ? 8 : 2}
-                  sx={{
-                    width: '100%',
-                    height: '100%',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    transform: expandedCamera?.id === camera.id ? 'scale(1.03)' : 'scale(1)',
-                    zIndex: expandedCamera?.id === camera.id ? 100 : 1,
-                    border: expandedCamera?.id === camera.id ? 2 : 1,
-                    borderColor: expandedCamera?.id === camera.id ? 'primary.main' : 'divider',
-                    '&:hover': {
-                      transform: 'scale(1.02)',
-                      borderColor: 'primary.main'
-                    }
-                  }}
-                  onClick={() => handleCameraClick(camera)}
-                >
-                  <CameraFeed
-                    cameraId={camera.id}
-                    targetFPS={15}
-                    isVisible={true}
-                  />
+              renderCamera={(camera, index) => {
+                // Hide non-expanded cameras when one is expanded
+                const isExpanded = expandedCamera?.id === camera.id;
+                const shouldHide = expandedCamera && !isExpanded;
 
-                  {/* Camera Label */}
-                  <Box sx={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    bgcolor: 'rgba(0, 0, 0, 0.7)',
-                    color: 'white',
-                    p: 1,
-                    backdropFilter: 'blur(4px)'
-                  }}>
-                    <Box sx={{ fontSize: '0.875rem', fontWeight: 'bold' }}>
-                      {camera.name}
+                return (
+                  <Paper
+                    elevation={isExpanded ? 8 : 2}
+                    sx={{
+                      width: '100%',
+                      height: '100%',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      cursor: 'pointer',
+                      transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                      opacity: shouldHide ? 0 : 1,
+                      visibility: shouldHide ? 'hidden' : 'visible',
+                      transform: isExpanded ? 'scale(1)' : 'scale(1)',
+                      zIndex: isExpanded ? 100 : 1,
+                      border: isExpanded ? 2 : 1,
+                      borderColor: isExpanded ? 'primary.main' : 'divider',
+                      '&:hover': {
+                        transform: expandedCamera ? 'scale(1)' : 'scale(1.02)',
+                        borderColor: 'primary.main'
+                      }
+                    }}
+                    onClick={() => handleCameraClick(camera)}
+                  >
+                    {/* FIXED: Always render feed, control visibility via isVisible prop */}
+                    <CameraFeed
+                      cameraId={camera.id}
+                      targetFPS={20} // FIXED: Increased FPS
+                      isVisible={!shouldHide} // FIXED: Feed updates when visible
+                      renderDetections={isExpanded}
+                    />
+
+                    {/* Camera Label */}
+                    <Box sx={{
+                      position: 'absolute',
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      bgcolor: 'rgba(0, 0, 0, 0.7)',
+                      color: 'white',
+                      p: 1,
+                      backdropFilter: 'blur(4px)',
+                      pointerEvents: 'none' // FIXED: Don't block clicks
+                    }}>
+                      <Box sx={{ fontSize: '0.875rem', fontWeight: 'bold' }}>
+                        {camera.name}
+                      </Box>
+                      <Box sx={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                        {camera.location}
+                      </Box>
                     </Box>
-                    <Box sx={{ fontSize: '0.75rem', opacity: 0.8 }}>
-                      {camera.location}
+
+                    {/* Channel Number */}
+                    <Box sx={{
+                      position: 'absolute',
+                      top: 8,
+                      left: 8,
+                      bgcolor: 'rgba(0, 0, 0, 0.7)',
+                      color: 'white',
+                      px: 1,
+                      py: 0.5,
+                      borderRadius: 1,
+                      fontSize: '0.75rem',
+                      fontWeight: 'bold',
+                      pointerEvents: 'none' // FIXED: Don't block clicks
+                    }}>
+                      CH{index + 1}
                     </Box>
-                  </Box>
 
-                  {/* Channel Number */}
-                  <Box sx={{
-                    position: 'absolute',
-                    top: 8,
-                    left: 8,
-                    bgcolor: 'rgba(0, 0, 0, 0.7)',
-                    color: 'white',
-                    px: 1,
-                    py: 0.5,
-                    borderRadius: 1,
-                    fontSize: '0.75rem',
-                    fontWeight: 'bold'
-                  }}>
-                    CH{index + 1}
-                  </Box>
+                    {/* Status Indicator */}
+                    <Box sx={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 8,
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      bgcolor: camera.status === 'online' ? '#4caf50' : '#f44336',
+                      boxShadow: '0 0 8px currentColor',
+                      pointerEvents: 'none' // FIXED: Don't block clicks
+                    }} />
 
-                  {/* Status Indicator */}
-                  <Box sx={{
-                    position: 'absolute',
-                    top: 8,
-                    right: 8,
-                    width: 12,
-                    height: 12,
-                    borderRadius: '50%',
-                    bgcolor: camera.status === 'online' ? '#4caf50' : '#f44336',
-                    boxShadow: '0 0 8px currentColor'
-                  }} />
-                </Paper>
-              )}
+                    {/* Close button when expanded - FIXED: Higher z-index */}
+                    {isExpanded && (
+                      <IconButton
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCameraClick(camera);
+                        }}
+                        sx={{
+                          position: 'absolute',
+                          top: 8,
+                          right: 40,
+                          bgcolor: 'rgba(0, 0, 0, 0.7)',
+                          color: 'white',
+                          zIndex: 1000, // FIXED: Above everything
+                          '&:hover': {
+                            bgcolor: 'rgba(0, 0, 0, 0.9)'
+                          }
+                        }}
+                      >
+                        <Close />
+                      </IconButton>
+                    )}
+                  </Paper>
+                );
+              }}
               cameras={cameras}
-              gridSize={gridSize}
+              gridSize={expandedCamera ? '1x1' : gridSize}
               darkMode={darkMode}
               expandedCamera={expandedCamera}
               onCameraClick={handleCameraClick}
@@ -176,25 +244,39 @@ const MainLayout: React.FC = () => {
             />
           </Box>
 
-          {/* Expanded Camera View (Large on Right) */}
-          {expandedCamera && (
+          {/* FIXED: Sidebar as overlay, not flex item */}
+          {expandedCamera && rightSidebarOpen && (
             <Box sx={{
-              flex: '0 0 450px',
-              display: rightSidebarOpen ? 'block' : 'none',
+              position: 'fixed', // FIXED: Position fixed instead of flex
+              right: 0,
+              top: 80, // Below header
+              width: 450,
+              height: 'calc(100vh - 80px)',
               borderLeft: 1,
               borderColor: 'divider',
-              overflow: 'hidden',
-              bgcolor: 'background.default',
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+              bgcolor: 'background.paper',
+              boxShadow: '-4px 0 12px rgba(0,0,0,0.15)',
+              zIndex: 1200, // FIXED: Above camera grid
+              transform: rightSidebarOpen ? 'translateX(0)' : 'translateX(100%)',
+              transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              overflow: 'hidden'
             }}>
-              <Box sx={{ height: '50%', borderBottom: 1, borderColor: 'divider' }}>
-                <CameraFeed
-                  cameraId={expandedCamera.id}
-                  targetFPS={15}
-                  isVisible={true}
-                  renderDetections={true}
-                />
-              </Box>
+              {/* Close button */}
+              <IconButton
+                onClick={handleCloseSidebar}
+                sx={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  zIndex: 1,
+                  bgcolor: 'background.paper',
+                  '&:hover': {
+                    bgcolor: 'action.hover'
+                  }
+                }}
+              >
+                <Close />
+              </IconButton>
 
               {/* Camera Info Bar */}
               <Box sx={{
@@ -211,9 +293,17 @@ const MainLayout: React.FC = () => {
                 </Box>
               </Box>
 
-              {/* Placeholder for future content */}
-              <Box sx={{ height: 'calc(50% - 88px)', overflow: 'auto' }}>
-                {/* Additional camera info can go here */}
+              {/* Details content */}
+              <Box sx={{ height: 'calc(60% - 88px)', overflow: 'auto' }}>
+                <CameraDetailSidebar
+                  open={true}
+                  camera={expandedCamera}
+                  onClose={handleCloseSidebar}
+                  onUpdate={handleUpdate}
+                  onDelete={handleDelete}
+                  onCalibrate={handleCalibrate}
+                  embedded={true} // New prop to render without drawer
+                />
               </Box>
             </Box>
           )}
@@ -236,7 +326,7 @@ const MainLayout: React.FC = () => {
         gridSize={gridSize}
         onGridSizeChange={setGridSize}
         onAddCamera={() => setAddCameraOpen(true)}
-        showCameraControls={true}
+        showCameraControls={!expandedCamera} // FIXED: Hide controls when expanded
       />
 
       {renderContent()}
@@ -251,18 +341,6 @@ const MainLayout: React.FC = () => {
         onMouseLeave={() => {}}
         onTabChange={setActiveTab}
       />
-
-      <CameraDetailSidebar
-        open={rightSidebarOpen}
-        camera={expandedCamera}
-        onClose={handleCloseSidebar}
-        onUpdate={handleUpdate}
-        onDelete={handleDelete}
-        onCalibrate={handleCalibrate}
-      />
-
-      <BackendHealthIndicator position="top-right" />
-
       {memoryStatus.isCritical && (
         <Alert severity="error" sx={{ position: 'fixed', top: 60, right: 16, zIndex: 9999 }}>
           {memoryStatus.recommendedAction}

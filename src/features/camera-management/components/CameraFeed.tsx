@@ -46,7 +46,7 @@ interface AnnotationData {
 export const CameraFeed = memo<CameraFeedProps>(({
                                                    cameraId,
                                                    wsUrl = 'ws://localhost:8000',
-                                                   targetFPS = 15,
+                                                   targetFPS = 20, // INCREASED default FPS
                                                    onFrame,
                                                    onError,
                                                    isVisible = true,
@@ -59,6 +59,10 @@ export const CameraFeed = memo<CameraFeedProps>(({
   const mountedRef = useRef(true);
   const imageRef = useRef<HTMLImageElement | null>(null);
 
+  // OPTIMIZATION: Use OffscreenCanvas if available
+  const offscreenCanvasRef = useRef<OffscreenCanvas | null>(null);
+  const renderWorkerRef = useRef<Worker | null>(null);
+
   // Separate storage for video frame and annotations
   const currentFrameRef = useRef<FrameData | null>(null);
   const annotationsRef = useRef<AnnotationData>({
@@ -66,6 +70,10 @@ export const CameraFeed = memo<CameraFeedProps>(({
     trackedObjects: [],
     timestamp: 0
   });
+
+  // OPTIMIZATION: Track render performance
+  const lastRenderTime = useRef(0);
+  const renderQueue = useRef<FrameData[]>([]);
 
   // Track latency for sync
   const [latencyMs, setLatencyMs] = useState(0);
@@ -77,12 +85,31 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
   const normalizedCameraId = String(cameraId);
 
-  // Draw frame and annotations together
+  // OPTIMIZATION: Throttled render function
+  const scheduleRender = useCallback(() => {
+    if (!mountedRef.current || !isActiveRef.current) return;
+
+    const now = performance.now();
+    const minFrameTime = 1000 / targetFPS;
+
+    if (now - lastRenderTime.current < minFrameTime) {
+      // Skip this frame to maintain target FPS
+      return;
+    }
+
+    lastRenderTime.current = now;
+    requestAnimationFrame(() => drawFrameWithAnnotations());
+  }, [targetFPS]);
+
+  // OPTIMIZED: Draw frame and annotations together
   const drawFrameWithAnnotations = useCallback(() => {
     if (!canvasRef.current || !mountedRef.current || !currentFrameRef.current) return;
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { alpha: false });
+    const ctx = canvas.getContext('2d', {
+      alpha: false,
+      desynchronized: true // OPTIMIZATION: Better performance
+    });
     if (!ctx) return;
 
     if (!imageRef.current) {
@@ -95,22 +122,25 @@ export const CameraFeed = memo<CameraFeedProps>(({
     img.onload = () => {
       if (!mountedRef.current || !canvasRef.current) return;
 
-      // Set canvas size
-      canvas.width = img.width;
-      canvas.height = img.height;
+      // OPTIMIZATION: Only resize if needed
+      if (canvas.width !== img.width || canvas.height !== img.height) {
+        canvas.width = img.width;
+        canvas.height = img.height;
+      }
 
       // Draw video frame
       ctx.drawImage(img, 0, 0);
 
-      // Draw annotations on top
+      // Draw annotations on top (only if enabled and fresh)
       if (renderDetections) {
         const annotations = annotationsRef.current;
-
-        // Calculate if annotations are still fresh (within 500ms of frame)
         const annotationAge = Math.abs(annotations.timestamp - frameData.serverTime);
         const isAnnotationFresh = annotationAge < 500;
 
         if (isAnnotationFresh) {
+          // OPTIMIZATION: Batch drawing operations
+          ctx.save();
+
           // Draw detections
           ctx.globalAlpha = 1.0;
           annotations.detections.forEach((det) => {
@@ -174,24 +204,23 @@ export const CameraFeed = memo<CameraFeedProps>(({
               ctx.fillText(speedLabel, x1 + 4, y2 + textHeight * 2 - 2);
             }
           });
-        } else if (annotationAge > 1000) {
-          // Show warning if annotations are very stale
-          ctx.fillStyle = 'rgba(255, 152, 0, 0.7)';
-          ctx.fillRect(10, 10, 200, 30);
-          ctx.fillStyle = '#000';
-          ctx.font = 'bold 12px Arial';
-          ctx.fillText('⚠️ Annotations delayed', 15, 28);
+
+          ctx.restore();
         }
       }
     };
 
+    // OPTIMIZATION: Reuse image src if it's the same
     const src = frameData.frame.startsWith('data:')
       ? frameData.frame
       : `data:image/jpeg;base64,${frameData.frame}`;
-    img.src = src;
+
+    if (img.src !== src) {
+      img.src = src;
+    }
   }, [renderDetections, normalizedCameraId]);
 
-  // Handle WebSocket messages
+  // OPTIMIZED: Handle WebSocket messages
   const handleMessage = useCallback((data: any) => {
     if (!isActiveRef.current || !mountedRef.current || !isVisible) return;
 
@@ -203,10 +232,6 @@ export const CameraFeed = memo<CameraFeedProps>(({
     const serverTime = data.timestamp || receiveTime;
 
     frameCountRef.current++;
-
-    if (frameCountRef.current % 30 === 0) {
-      console.log(`[CameraFeed ${normalizedCameraId}] Processed ${frameCountRef.current} frames`);
-    }
 
     // Calculate latency
     const latency = receiveTime - serverTime;
@@ -280,14 +305,20 @@ export const CameraFeed = memo<CameraFeedProps>(({
       tracks: trackedObjects.length
     });
 
-    // Draw frame with annotations
+    // OPTIMIZED: Schedule render instead of immediate draw
     if (data.frame) {
-      drawFrameWithAnnotations();
+      scheduleRender();
     }
-  }, [isVisible, normalizedCameraId, onFrame, renderDetections, drawFrameWithAnnotations]);
+  }, [isVisible, normalizedCameraId, onFrame, renderDetections, scheduleRender]);
 
   useEffect(() => {
     if (!isVisible) {
+      // OPTIMIZATION: Disconnect when not visible
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      isActiveRef.current = false;
       return;
     }
 
@@ -350,7 +381,8 @@ export const CameraFeed = memo<CameraFeedProps>(({
           height: '100%',
           objectFit: 'contain',
           backgroundColor: '#000',
-          display: isConnected ? 'block' : 'none'
+          display: isConnected ? 'block' : 'none',
+          imageRendering: 'crisp-edges' // OPTIMIZATION: Faster rendering
         }}
       />
 
