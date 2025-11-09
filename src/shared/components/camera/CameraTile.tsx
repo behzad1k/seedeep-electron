@@ -8,7 +8,6 @@ interface CameraTileProps {
   index: number;
   darkMode: boolean;
   onClick: (camera: Camera) => void;
-  handleOpenFeatureConfig: (camera: BackendCamera) => void;
 }
 
 export const CameraTile = memo<CameraTileProps>(({
@@ -16,7 +15,6 @@ export const CameraTile = memo<CameraTileProps>(({
                                                    index,
                                                    darkMode,
                                                    onClick,
-                                                    handleOpenFeatureConfig,
                                                  }) => {
   const handleClick = useCallback(() => {
     onClick(camera);
@@ -85,7 +83,6 @@ export const CameraTile = memo<CameraTileProps>(({
       <IconButton
         onClick={(e) => {
           e.stopPropagation();
-          handleOpenFeatureConfig(camera as any);
         }}
         sx={{ position: 'absolute', zIndex: 4, color: 'white', bottom: 0, right: 0 }}
       >

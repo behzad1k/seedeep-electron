@@ -26,7 +26,8 @@
       "@hooks/*": ["./src/shared/hooks/*"],
       "@services/*": ["./src/shared/services/*"],
       "@utils/*": ["./src/shared/utils/*"],
-      "@types/*": ["./src/shared/types/*"]
+      "@types/*": ["./src/shared/types/*"],
+      "@contexts/*": ["./src/contexts/*"]
     },
     "types": ["vite/client"]
   },

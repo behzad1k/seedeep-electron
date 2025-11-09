@@ -342,7 +342,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
   if (!isVisible) return null;
 
   return (
-    <Box sx={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#000' }}>
+    <Box sx={{ flex: 1, width: '100%', height: '100%', position: 'relative', backgroundColor: '#000' }}>
       <canvas
         ref={canvasRef}
         style={{

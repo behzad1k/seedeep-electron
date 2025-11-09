@@ -16,6 +16,7 @@ import {
   Brightness4,
   Brightness7,
 } from '@mui/icons-material';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export interface SidebarItem {
   id: string;
@@ -27,27 +28,24 @@ interface AppSidebarProps {
   open: boolean;
   hovered: boolean;
   activeTab: string;
-  darkMode: boolean;
   items: SidebarItem[];
   onToggle: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onTabChange: (tabId: string) => void;
-  onThemeToggle: () => void;
 }
 
 export const AppSidebar = memo<AppSidebarProps>(({
                                                    open,
                                                    hovered,
                                                    activeTab,
-                                                   darkMode,
                                                    items,
                                                    onToggle,
                                                    onMouseEnter,
                                                    onMouseLeave,
-                                                   onTabChange,
-                                                   onThemeToggle
+                                                   onTabChange
                                                  }) => {
+  const { darkMode, toggleTheme } = useTheme();
   const drawerWidth = open || hovered ? 240 : 60;
 
   return (
@@ -64,8 +62,9 @@ export const AppSidebar = memo<AppSidebarProps>(({
           boxSizing: 'border-box',
           transition: 'width 0.3s ease',
           overflow: 'hidden',
-          backgroundColor: darkMode ? '#1a1a1a' : '#fafafa',
-          borderRight: `1px solid ${darkMode ? '#333' : '#e0e0e0'}`,
+          bgcolor: 'background.paper',
+          borderRight: 1,
+          borderColor: 'divider'
         },
       }}
     >
@@ -103,9 +102,10 @@ export const AppSidebar = memo<AppSidebarProps>(({
                 justifyContent: open || hovered ? 'initial' : 'center',
                 px: 2.5,
                 '&.Mui-selected': {
-                  backgroundColor: darkMode ? 'rgba(46, 125, 50, 0.16)' : 'rgba(46, 125, 50, 0.12)',
+                  bgcolor: 'primary.main',
+                  color: 'primary.contrastText',
                   '&:hover': {
-                    backgroundColor: darkMode ? 'rgba(46, 125, 50, 0.24)' : 'rgba(46, 125, 50, 0.16)',
+                    bgcolor: 'primary.dark',
                   },
                 },
               }}
@@ -115,7 +115,7 @@ export const AppSidebar = memo<AppSidebarProps>(({
                   minWidth: 0,
                   mr: open || hovered ? 3 : 'auto',
                   justifyContent: 'center',
-                  color: activeTab === item.id ? 'primary.main' : 'inherit',
+                  color: activeTab === item.id ? 'inherit' : 'text.primary',
                 }}
               >
                 {item.icon}
@@ -136,11 +136,12 @@ export const AppSidebar = memo<AppSidebarProps>(({
 
       <Box sx={{ p: 2 }}>
         <ListItemButton
-          onClick={onThemeToggle}
+          onClick={toggleTheme}
           sx={{
             minHeight: 48,
             justifyContent: open || hovered ? 'initial' : 'center',
             borderRadius: 1,
+            bgcolor: 'action.hover'
           }}
         >
           <ListItemIcon
@@ -154,7 +155,7 @@ export const AppSidebar = memo<AppSidebarProps>(({
           </ListItemIcon>
           {(open || hovered) && (
             <ListItemText
-              primary="Toggle Theme"
+              primary={darkMode ? "Light Mode" : "Dark Mode"}
               sx={{
                 opacity: open || hovered ? 1 : 0,
                 transition: 'opacity 0.3s ease',
