@@ -109,13 +109,14 @@ const MainLayout: React.FC = () => {
         />
       );
     }
-
+    console.log('cameras',cameras);
     if (activeTab === 'cameras') {
       const GridComponent = cameras.length > 16 ? VirtualizedCameraGrid : CameraGrid;
 
       return (
         <GridComponent
           renderCamera={(camera) => <CameraFeed
+            rtspUrl={camera.rtsp_url}
             cameraId={camera.id}
             targetFPS={15}
             isVisible={true}

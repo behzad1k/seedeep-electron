@@ -21,6 +21,28 @@ interface DetectionBox {
   label: string;
 }
 
+interface TrackedObject {
+  track_id: string;
+  class_name: string;
+  bbox: [number, number, number, number];
+  centroid: [number, number];
+  confidence: number;
+  speed_kmh?: number;
+  speed_m_per_sec?: number;
+}
+
+interface FrameData {
+  frame: string;
+  timestamp: number;
+  serverTime: number;
+}
+
+interface AnnotationData {
+  detections: DetectionBox[];
+  trackedObjects: TrackedObject[];
+  timestamp: number;
+}
+
 export const CameraFeed = memo<CameraFeedProps>(({
                                                    cameraId,
                                                    wsUrl = 'ws://localhost:8000',
@@ -37,14 +59,27 @@ export const CameraFeed = memo<CameraFeedProps>(({
   const mountedRef = useRef(true);
   const imageRef = useRef<HTMLImageElement | null>(null);
 
-  const [detections, setDetections] = useState<DetectionBox[]>([]);
+  // Separate storage for video frame and annotations
+  const currentFrameRef = useRef<FrameData | null>(null);
+  const annotationsRef = useRef<AnnotationData>({
+    detections: [],
+    trackedObjects: [],
+    timestamp: 0
+  });
+
+  // Track latency for sync
+  const [latencyMs, setLatencyMs] = useState(0);
+  const timeOffsetRef = useRef(0);
+
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState({ detections: 0, tracks: 0 });
 
   const normalizedCameraId = String(cameraId);
 
-  const drawFrame = useCallback((frameData: string, dets: DetectionBox[]) => {
-    if (!canvasRef.current || !mountedRef.current) return;
+  // Draw frame and annotations together
+  const drawFrameWithAnnotations = useCallback(() => {
+    if (!canvasRef.current || !mountedRef.current || !currentFrameRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -55,39 +90,108 @@ export const CameraFeed = memo<CameraFeedProps>(({
     }
 
     const img = imageRef.current;
+    const frameData = currentFrameRef.current;
 
     img.onload = () => {
       if (!mountedRef.current || !canvasRef.current) return;
 
+      // Set canvas size
       canvas.width = img.width;
       canvas.height = img.height;
 
+      // Draw video frame
       ctx.drawImage(img, 0, 0);
 
-      if (renderDetections && dets.length > 0) {
-        dets.forEach((det) => {
-          ctx.strokeStyle = '#00ff00';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(det.x1, det.y1, det.x2 - det.x1, det.y2 - det.y1);
+      // Draw annotations on top
+      if (renderDetections) {
+        const annotations = annotationsRef.current;
 
-          const label = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
-          ctx.font = '14px Arial';
-          const textMetrics = ctx.measureText(label);
-          const textHeight = 20;
+        // Calculate if annotations are still fresh (within 500ms of frame)
+        const annotationAge = Math.abs(annotations.timestamp - frameData.serverTime);
+        const isAnnotationFresh = annotationAge < 500;
 
-          ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-          ctx.fillRect(det.x1, det.y1 - textHeight, textMetrics.width + 8, textHeight);
+        if (isAnnotationFresh) {
+          // Draw detections
+          ctx.globalAlpha = 1.0;
+          annotations.detections.forEach((det) => {
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(det.x1, det.y1, det.x2 - det.x1, det.y2 - det.y1);
 
+            const label = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
+            ctx.font = '14px Arial';
+            const textMetrics = ctx.measureText(label);
+            const textHeight = 20;
+
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+            ctx.fillRect(det.x1, det.y1 - textHeight, textMetrics.width + 8, textHeight);
+
+            ctx.fillStyle = '#000';
+            ctx.fillText(label, det.x1 + 4, det.y1 - 6);
+          });
+
+          // Draw tracked objects
+          annotations.trackedObjects.forEach((obj) => {
+            const [x1, y1, x2, y2] = obj.bbox;
+
+            // Draw bounding box
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+            // Draw centroid
+            ctx.fillStyle = '#ff00ff';
+            ctx.beginPath();
+            ctx.arc(obj.centroid[0], obj.centroid[1], 5, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // Draw tracking info
+            const trackLabel = `ID: ${obj.track_id}`;
+            const speedLabel = obj.speed_kmh
+              ? `${obj.speed_kmh.toFixed(1)} km/h`
+              : obj.speed_m_per_sec
+                ? `${obj.speed_m_per_sec.toFixed(2)} m/s`
+                : '';
+
+            ctx.font = 'bold 14px Arial';
+            const trackMetrics = ctx.measureText(trackLabel);
+            const textHeight = 20;
+
+            const boxWidth = Math.max(
+              trackMetrics.width,
+              speedLabel ? ctx.measureText(speedLabel).width : 0
+            ) + 8;
+            const boxHeight = textHeight * (speedLabel ? 2 : 1);
+
+            ctx.fillStyle = 'rgba(255, 0, 255, 0.8)';
+            ctx.fillRect(x1, y2 + 2, boxWidth, boxHeight);
+
+            ctx.fillStyle = '#fff';
+            ctx.fillText(trackLabel, x1 + 4, y2 + textHeight - 2);
+
+            if (speedLabel) {
+              ctx.font = '12px Arial';
+              ctx.fillText(speedLabel, x1 + 4, y2 + textHeight * 2 - 2);
+            }
+          });
+        } else if (annotationAge > 1000) {
+          // Show warning if annotations are very stale
+          ctx.fillStyle = 'rgba(255, 152, 0, 0.7)';
+          ctx.fillRect(10, 10, 200, 30);
           ctx.fillStyle = '#000';
-          ctx.fillText(label, det.x1 + 4, det.y1 - 6);
-        });
+          ctx.font = 'bold 12px Arial';
+          ctx.fillText('⚠️ Annotations delayed', 15, 28);
+        }
       }
     };
 
-    const src = frameData.startsWith('data:') ? frameData : `data:image/jpeg;base64,${frameData}`;
+    const src = frameData.frame.startsWith('data:')
+      ? frameData.frame
+      : `data:image/jpeg;base64,${frameData.frame}`;
     img.src = src;
-  }, [renderDetections]);
+  }, [renderDetections, normalizedCameraId]);
 
+  // Handle WebSocket messages
   const handleMessage = useCallback((data: any) => {
     if (!isActiveRef.current || !mountedRef.current || !isVisible) return;
 
@@ -95,18 +199,41 @@ export const CameraFeed = memo<CameraFeedProps>(({
       return;
     }
 
+    const receiveTime = Date.now();
+    const serverTime = data.timestamp || receiveTime;
+
     frameCountRef.current++;
 
     if (frameCountRef.current % 30 === 0) {
-      console.log(`[CameraFeed ${normalizedCameraId}] Received ${frameCountRef.current} frames`);
+      console.log(`[CameraFeed ${normalizedCameraId}] Processed ${frameCountRef.current} frames`);
+    }
+
+    // Calculate latency
+    const latency = receiveTime - serverTime;
+    setLatencyMs(latency);
+
+    // Update time offset with smoothing
+    if (timeOffsetRef.current === 0) {
+      timeOffsetRef.current = latency;
+    } else {
+      timeOffsetRef.current = timeOffsetRef.current * 0.9 + latency * 0.1;
     }
 
     setIsConnected(true);
     setError(null);
     onFrame?.(data);
 
-    let currentDetections: DetectionBox[] = [];
+    // Extract and store frame if present
+    if (data.frame) {
+      currentFrameRef.current = {
+        frame: data.frame,
+        timestamp: receiveTime,
+        serverTime: serverTime
+      };
+    }
 
+    // Extract detections
+    const currentDetections: DetectionBox[] = [];
     if (data.results && renderDetections) {
       Object.values(data.results).forEach((modelResult: any) => {
         if (modelResult.detections && Array.isArray(modelResult.detections)) {
@@ -124,12 +251,40 @@ export const CameraFeed = memo<CameraFeedProps>(({
       });
     }
 
-    setDetections(currentDetections);
-
-    if (data.frame) {
-      drawFrame(data.frame, currentDetections);
+    // Extract tracked objects
+    const trackedObjects: TrackedObject[] = [];
+    if (data.results?.tracking?.tracked_objects) {
+      Object.values(data.results.tracking.tracked_objects).forEach((obj: any) => {
+        trackedObjects.push({
+          track_id: obj.track_id,
+          class_name: obj.class_name,
+          bbox: obj.bbox,
+          centroid: obj.centroid,
+          confidence: obj.confidence,
+          speed_kmh: obj.speed_kmh,
+          speed_m_per_sec: obj.speed_m_per_sec
+        });
+      });
     }
-  }, [isVisible, normalizedCameraId, onFrame, renderDetections, drawFrame]);
+
+    // Update annotations
+    annotationsRef.current = {
+      detections: currentDetections,
+      trackedObjects: trackedObjects,
+      timestamp: serverTime
+    };
+
+    // Update stats
+    setStats({
+      detections: currentDetections.length,
+      tracks: trackedObjects.length
+    });
+
+    // Draw frame with annotations
+    if (data.frame) {
+      drawFrameWithAnnotations();
+    }
+  }, [isVisible, normalizedCameraId, onFrame, renderDetections, drawFrameWithAnnotations]);
 
   useEffect(() => {
     if (!isVisible) {
@@ -213,16 +368,53 @@ export const CameraFeed = memo<CameraFeedProps>(({
       )}
 
       {isConnected && (
-        <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', padding: '4px 8px', borderRadius: '4px' }}>
-          <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#00ff00', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.5 }, '100%': { opacity: 1 } } }} />
-          <Typography variant="caption" color="white">Live</Typography>
-        </Box>
-      )}
+        <>
+          <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', padding: '4px 8px', borderRadius: '4px' }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#00ff00', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.5 }, '100%': { opacity: 1 } } }} />
+            <Typography variant="caption" color="white">Live</Typography>
+            {latencyMs > 0 && (
+              <Typography
+                variant="caption"
+                sx={{
+                  ml: 1,
+                  color: latencyMs > 300 ? '#ff9800' : latencyMs > 500 ? '#f44336' : '#4caf50',
+                  fontWeight: latencyMs > 300 ? 'bold' : 'normal'
+                }}
+              >
+                {latencyMs}ms
+              </Typography>
+            )}
+          </Box>
 
-      {renderDetections && detections.length > 0 && (
-        <Box sx={{ position: 'absolute', bottom: 8, left: 8, backgroundColor: 'rgba(0, 0, 0, 0.7)', color: '#00ff00', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' }}>
-          Detections: {detections.length}
-        </Box>
+          {renderDetections && (stats.detections > 0 || stats.tracks > 0) && (
+            <Box sx={{ position: 'absolute', bottom: 8, left: 8, backgroundColor: 'rgba(0, 0, 0, 0.7)', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' }}>
+              <Typography variant="caption" sx={{ color: '#00ff00', display: 'block' }}>
+                Detections: {stats.detections}
+              </Typography>
+              {stats.tracks > 0 && (
+                <Typography variant="caption" sx={{ color: '#ff00ff', display: 'block' }}>
+                  Tracks: {stats.tracks}
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          {latencyMs > 500 && (
+            <Box sx={{
+              position: 'absolute',
+              top: 40,
+              right: 8,
+              backgroundColor: 'rgba(244, 67, 54, 0.9)',
+              color: 'white',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: 'bold'
+            }}>
+              ⚠️ High latency
+            </Box>
+          )}
+        </>
       )}
     </Box>
   );
