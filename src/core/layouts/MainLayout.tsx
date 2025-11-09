@@ -142,7 +142,7 @@ const MainLayout: React.FC = () => {
       {/* {addCameraOpen && */}
       {/*   <AddCamera onClose={() => setAddCameraOpen(false)} onSubmit={createCamera} availableModels={Object.values(MODEL_DEFINITIONS).map(e => ({ name: e.name, classes: e.classes}))}/> */}
       {/* } */}
-      <AppHeader title={'SeeDeep'} cameras={[]} gridSize={'4x4'} onGridSizeChange={(size ) => setGridSize(size)} onAddCamera={() => setAddCameraOpen(true)} showCameraControls={true}/>
+      <AppHeader title={'SeeDeep'} cameras={[]} gridSize={'2x2'} onGridSizeChange={(size ) => setGridSize(size)} onAddCamera={() => setAddCameraOpen(true)} showCameraControls={true}/>
 
       <Box sx={{ display: 'flex', height: '100vh' }}>
         {/* Sidebar, Header, Content... */}

@@ -99,21 +99,18 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
       });
 
       setWebcamStream(stream);
-      // Display video
+      console.log('h1');
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-
-        // Wait for video metadata to load
+        console.log('h2', stream);
         videoRef.current.onloadedmetadata = () => {
           if (!videoRef.current) return;
 
           videoRef.current.play()
           .then(() => {
-            setConnectionStatus('success');
-
-            // Capture frame after video starts
             setTimeout(() => {
               if (videoRef.current && videoRef.current.videoWidth > 0) {
+                console.log('h3');
                 const canvas = document.createElement('canvas');
                 canvas.width = videoRef.current.videoWidth;
                 canvas.height = videoRef.current.videoHeight;
@@ -129,13 +126,20 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                     height: videoRef.current.videoHeight
                   });
 
+                  // FIX: Set status to success
+                  setConnectionStatus('success');
+
                   console.log('✅ Webcam connected:', {
                     width: videoRef.current.videoWidth,
                     height: videoRef.current.videoHeight
                   });
                 }
+              } else {
+                // If still no video dimensions, show error
+                setConnectionStatus('error');
+                setConnectionError('Unable to read video dimensions');
               }
-            }, 1000);
+            }, 500);
           })
           .catch(err => {
             console.error('Play error:', err);
@@ -144,33 +148,23 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
           });
         };
 
-        videoRef.current.onerror = (err) => {
-          console.error('Video error:', err);
+        videoRef.current.onerror = () => {
+          console.error('Video element error');
           setConnectionStatus('error');
           setConnectionError('Video error occurred');
         };
-
-        // Timeout fallback
-        setTimeout(() => {
-          if (connectionStatus === 'testing') {
-            setConnectionStatus('error');
-            setConnectionError('Webcam connection timeout - please try again');
-          }
-        }, 10000);
       }
     } catch (error: any) {
       console.error('Webcam error:', error);
       setConnectionStatus('error');
       setConnectionError(error.message || 'Failed to access webcam');
 
-      // Cleanup
       if (webcamStream) {
         webcamStream.getTracks().forEach(track => track.stop());
         setWebcamStream(null);
       }
     }
   };
-
   const testConnection = async () => {
     if (formData.sourceType === 'webcam') {
       await testWebcamConnection();
@@ -568,15 +562,27 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         </Button>
       </Grid>
 
-      {formData.sourceType === 'webcam' && connectionStatus === 'success' && (
+      {formData.sourceType === 'webcam' && (connectionStatus === 'testing' || connectionStatus === 'success') && (
         <Grid item xs={12}>
           <Paper sx={{ p: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Webcam Preview</Typography>
-            <video ref={videoRef} style={{ width: '100%', maxHeight: '400px', objectFit: 'contain' }} />
+            <Typography variant="subtitle2" gutterBottom>
+              {connectionStatus === 'testing' ? 'Testing Webcam...' : 'Webcam Preview'}
+            </Typography>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{
+                width: '100%',
+                maxHeight: '400px',
+                objectFit: 'contain',
+                backgroundColor: '#000'
+              }}
+            />
           </Paper>
         </Grid>
       )}
-
       {connectionStatus === 'success' && previewFrame && formData.sourceType !== 'webcam' && (
         <Grid item xs={12}>
           <Paper sx={{ p: 2 }}>

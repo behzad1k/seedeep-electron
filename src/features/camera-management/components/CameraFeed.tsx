@@ -1,4 +1,3 @@
-import { FrameRateLimiter } from '@utils/performance/FrameRateLimiter.ts';
 import { WebSocketPool } from '@utils/websocket/WebsocketPool.ts';
 import React, { useRef, useEffect, useCallback, memo, useState } from 'react';
 import { Box, Typography, CircularProgress } from '@mui/material';
@@ -32,32 +31,41 @@ export const CameraFeed = memo<CameraFeedProps>(({
                                                    renderDetections = true
                                                  }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const isActiveRef = useRef(true);
   const frameCountRef = useRef(0);
   const mountedRef = useRef(true);
+  const webcamStreamRef = useRef<MediaStream | null>(null);
+  const sendFrameIntervalRef = useRef<any | null>(null);
 
   const [detections, setDetections] = useState<DetectionBox[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [lastFrame, setLastFrame] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isWebcamMode, setIsWebcamMode] = useState(false);
+  const [webcamStarted, setWebcamStarted] = useState(false);
 
-  // Normalize camera ID to string for consistent comparison
   const normalizedCameraId = String(cameraId);
 
-  // Handle WebSocket messages from backend
+  // Handle WebSocket messages
   const handleMessage = useCallback((data: any) => {
     if (!isActiveRef.current || !mountedRef.current || !isVisible) return;
 
-    // Check camera ID match (normalize both sides)
+    // Webcam mode detection
+    if (data.status === 'connected' && data.message?.includes('Webcam mode')) {
+      console.log('[CameraFeed] Webcam mode detected');
+      setIsWebcamMode(true);
+      setIsConnected(true);
+      return;
+    }
+
     if (data.camera_id && String(data.camera_id) !== normalizedCameraId) {
-      console.warn('[CameraFeed] Camera ID mismatch:', data.camera_id, 'vs', normalizedCameraId);
       return;
     }
 
     frameCountRef.current++;
 
-    // Log every 30 frames (roughly every 2 seconds at 15fps)
     if (frameCountRef.current % 30 === 0) {
       console.log(`[CameraFeed ${normalizedCameraId}] Received ${frameCountRef.current} frames`);
     }
@@ -66,12 +74,10 @@ export const CameraFeed = memo<CameraFeedProps>(({
     setError(null);
     onFrame?.(data);
 
-    // If backend sends back the frame as base64
     if (data.frame) {
       setLastFrame(data.frame);
     }
 
-    // Extract detections from all models
     if (data.results && renderDetections) {
       const allDetections: DetectionBox[] = [];
 
@@ -94,16 +100,141 @@ export const CameraFeed = memo<CameraFeedProps>(({
     }
   }, [isVisible, normalizedCameraId, onFrame, renderDetections]);
 
-  // Initialize WebSocket connection
-  useEffect(() => {
-    if (!isVisible) {
-      console.log(`[CameraFeed ${normalizedCameraId}] Not visible, skipping connection`);
+  // Start webcam and send frames
+  const startWebcamStream = useCallback(async () => {
+    if (webcamStarted) {
+      console.log('[CameraFeed] Webcam already started');
       return;
     }
 
-    // Prevent duplicate subscriptions
+    try {
+      console.log('[CameraFeed] Starting webcam...');
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+
+      webcamStreamRef.current = stream;
+      setWebcamStarted(true);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+
+        videoRef.current.onloadedmetadata = () => {
+          if (!videoRef.current) return;
+
+          videoRef.current.play()
+          .then(() => {
+            console.log('✅ Webcam started');
+
+            const frameInterval = 1000 / targetFPS;
+
+            sendFrameIntervalRef.current = setInterval(async () => {
+              if (!videoRef.current || !isActiveRef.current) return;
+
+              const canvas = document.createElement('canvas');
+              canvas.width = videoRef.current.videoWidth;
+              canvas.height = videoRef.current.videoHeight;
+              const ctx = canvas.getContext('2d');
+
+              if (ctx && videoRef.current.videoWidth > 0) {
+                ctx.drawImage(videoRef.current, 0, 0);
+
+                canvas.toBlob(async (blob) => {
+                  if (!blob) return;
+
+                  try {
+                    const timestamp = Math.floor(Date.now() / 1000);
+                    const cameraIdBytes = new TextEncoder().encode(normalizedCameraId);
+                    const imageBuffer = await blob.arrayBuffer();
+
+                    const headerSize = 1 + cameraIdBytes.length + 4;
+                    const totalSize = headerSize + imageBuffer.byteLength;
+
+                    const buffer = new ArrayBuffer(totalSize);
+                    const view = new DataView(buffer);
+                    const uint8View = new Uint8Array(buffer);
+
+                    let offset = 0;
+
+                    view.setUint8(offset, cameraIdBytes.length);
+                    offset += 1;
+
+                    uint8View.set(cameraIdBytes, offset);
+                    offset += cameraIdBytes.length;
+
+                    view.setUint32(offset, timestamp, true);
+                    offset += 4;
+
+                    uint8View.set(new Uint8Array(imageBuffer), offset);
+
+                    // OPTION 1: Use WebSocketPool's sendBinaryFrame (if available)
+                    const pool = WebSocketPool.getInstance();
+                    const cameraWsUrl = `${wsUrl.replace(/\/ws$/, '')}/ws/camera/${normalizedCameraId}`;
+
+                    // Try the new method if it exists
+                    if (typeof (pool as any).sendRawBinary === 'function') {
+                      (pool as any).sendRawBinary(cameraWsUrl, buffer);
+                    } else {
+                      // Fallback: use sendBinaryFrame
+                      pool.sendBinaryFrame(cameraWsUrl, {
+                        cameraId: normalizedCameraId,
+                        timestamp,
+                        imageData: imageBuffer
+                      });
+                    }
+                  } catch (err) {
+                    console.error('[CameraFeed] Error sending frame:', err);
+                  }
+                }, 'image/jpeg', 0.7);
+              }
+            }, frameInterval);
+
+            console.log(`✅ Sending webcam frames every ${frameInterval}ms`);
+          })
+          .catch(err => {
+            console.error('Play error:', err);
+            setError('Failed to play video: ' + err.message);
+          });
+        };
+      }
+    } catch (error: any) {
+      console.error('Webcam error:', error);
+      setError(error.message || 'Failed to access webcam');
+      onError?.(error);
+    }
+  }, [webcamStarted, normalizedCameraId, targetFPS, wsUrl, onError]);
+
+  // Stop webcam
+  const stopWebcamStream = useCallback(() => {
+    if (sendFrameIntervalRef.current) {
+      clearInterval(sendFrameIntervalRef.current);
+      sendFrameIntervalRef.current = null;
+    }
+
+    if (webcamStreamRef.current) {
+      webcamStreamRef.current.getTracks().forEach(track => track.stop());
+      webcamStreamRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    setWebcamStarted(false);
+    console.log('[CameraFeed] Webcam stopped');
+  }, []);
+
+  // Initialize WebSocket
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
     if (unsubscribeRef.current) {
-      console.log(`[CameraFeed ${normalizedCameraId}] Already subscribed, skipping`);
       return;
     }
 
@@ -115,7 +246,6 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
     console.log(`[CameraFeed ${normalizedCameraId}] Connecting to:`, cameraWsUrl);
 
-    // Add a small delay to prevent race conditions
     const timeoutId = setTimeout(() => {
       if (!mountedRef.current) return;
 
@@ -134,19 +264,34 @@ export const CameraFeed = memo<CameraFeedProps>(({
     }, 100);
 
     return () => {
-      console.log(`[CameraFeed ${normalizedCameraId}] Cleanup: unsubscribing`);
+      console.log(`[CameraFeed ${normalizedCameraId}] Cleanup`);
       clearTimeout(timeoutId);
       mountedRef.current = false;
       isActiveRef.current = false;
+
+      stopWebcamStream();
 
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
     };
-  }, [normalizedCameraId, wsUrl, isVisible, handleMessage, onError]);
+  }, [normalizedCameraId, wsUrl, isVisible, handleMessage, onError, stopWebcamStream]);
 
-  // Draw frame and detections on canvas
+  // Start webcam when mode detected
+  useEffect(() => {
+    if (isWebcamMode && isConnected && !webcamStarted) {
+      startWebcamStream();
+    }
+
+    return () => {
+      if (isWebcamMode) {
+        stopWebcamStream();
+      }
+    };
+  }, [isWebcamMode, isConnected, webcamStarted, startWebcamStream, stopWebcamStream]);
+
+  // Draw frame and detections
   useEffect(() => {
     if (!canvasRef.current || !lastFrame) return;
 
@@ -189,6 +334,14 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
   return (
     <Box sx={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#000' }}>
+      <video
+        ref={videoRef}
+        style={{ display: 'none' }}
+        autoPlay
+        playsInline
+        muted
+      />
+
       <canvas
         ref={canvasRef}
         style={{
@@ -203,17 +356,15 @@ export const CameraFeed = memo<CameraFeedProps>(({
       {!isConnected && !error && (
         <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', color: 'white' }}>
           <CircularProgress color="primary" size={40} sx={{ mb: 2 }} />
-          <Typography variant="body2">Connecting to camera...</Typography>
-          <Typography variant="caption" sx={{ mt: 1, opacity: 0.7 }}>Camera ID: {normalizedCameraId}</Typography>
+          <Typography variant="body2">Connecting...</Typography>
         </Box>
       )}
 
-      {isConnected && !lastFrame && !error && (
+      {isConnected && !lastFrame && !error && !webcamStarted && (
         <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', color: 'white' }}>
           <CircularProgress color="primary" size={40} sx={{ mb: 2 }} />
-          <Typography variant="body2">Waiting for stream...</Typography>
-          <Typography variant="caption" sx={{ mt: 1, opacity: 0.7 }}>
-            Frame count: {frameCountRef.current}
+          <Typography variant="body2">
+            {isWebcamMode ? 'Starting webcam...' : 'Waiting for stream...'}
           </Typography>
         </Box>
       )}
@@ -227,7 +378,9 @@ export const CameraFeed = memo<CameraFeedProps>(({
       {isConnected && lastFrame && (
         <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', padding: '4px 8px', borderRadius: '4px' }}>
           <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#00ff00', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.5 }, '100%': { opacity: 1 } } }} />
-          <Typography variant="caption" color="white">Live</Typography>
+          <Typography variant="caption" color="white">
+            Live{isWebcamMode && ' (Webcam)'}
+          </Typography>
         </Box>
       )}
 

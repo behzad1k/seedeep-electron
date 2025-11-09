@@ -195,7 +195,25 @@ export class WebSocketPool {
   }
 
   /**
-   * Send binary frame data
+   * Send raw binary data directly through the WebSocket
+   * This is for webcam frame sending
+   */
+  sendRawBinary(url: string, data: ArrayBuffer): void {
+    const connection = this.connections.get(url);
+    if (!connection || connection.ws.readyState !== WebSocket.OPEN) {
+      console.warn(`[WebSocketPool] Cannot send data - connection not ready for ${url}`);
+      return;
+    }
+
+    try {
+      connection.ws.send(data);
+    } catch (error) {
+      console.error(`[WebSocketPool] Error sending raw binary:`, error);
+    }
+  }
+
+  /**
+   * Send binary frame data (legacy method - kept for compatibility)
    */
   sendBinaryFrame(url: string, data: {
     cameraId: string;
@@ -256,6 +274,14 @@ export class WebSocketPool {
       subscriberCount: connection.subscribers.size,
       reconnectAttempts: connection.reconnectAttempts
     };
+  }
+
+  /**
+   * Get the actual WebSocket for direct access (for webcam)
+   */
+  getWebSocket(url: string): WebSocket | null {
+    const connection = this.connections.get(url);
+    return connection?.ws || null;
   }
 
   /**

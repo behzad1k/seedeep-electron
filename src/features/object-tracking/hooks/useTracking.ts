@@ -39,7 +39,7 @@ export const useTracking = (options: UseTrackingOptions = {}) => {
     autoConnect = true,
     autoStart = false,
     trackingConfig = {},
-    models = [{ name: 'others_detection' }]
+    models = [{ name: 'general_detection' }]
   } = options;
 
   const wsServiceRef = useRef<TrackingWebSocketService | null>(null);
