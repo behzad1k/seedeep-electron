@@ -61,13 +61,13 @@ const MainLayout: React.FC = () => {
   }, [createCamera]);
 
   // Refresh cameras periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchCameras();
-    }, 30000); // Refresh every 30 seconds
-
-    return () => clearInterval(interval);
-  }, [fetchCameras]);
+  // useEffect(() => {
+  //   const interval = setInterval(() => {
+  //     fetchCameras();
+  //   }, 30000); // Refresh every 30 seconds
+  //
+  //   return () => clearInterval(interval);
+  // }, [fetchCameras]);
 
   const handleOpenFeatureConfig = (camera: BackendCamera) => {
     setConfigCamera(camera);
@@ -137,7 +137,7 @@ const MainLayout: React.FC = () => {
     <Box sx={{ paddingLeft: 7}}>
       <Modal open={addCameraOpen}
              onClose={() => setAddCameraOpen(false)}>
-          <AddCamera onClose={() => setAddCameraOpen(false)} onSubmit={createCamera} availableModels={Object.values(MODEL_DEFINITIONS).map(e => ({ name: e.name, classes: e.classes}))}/>
+          <AddCamera onClose={() => setAddCameraOpen(false)} onSubmit={createCamera}/>
       </Modal>
       {/* {addCameraOpen && */}
       {/*   <AddCamera onClose={() => setAddCameraOpen(false)} onSubmit={createCamera} availableModels={Object.values(MODEL_DEFINITIONS).map(e => ({ name: e.name, classes: e.classes}))}/> */}
