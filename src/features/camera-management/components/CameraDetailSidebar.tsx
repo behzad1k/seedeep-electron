@@ -135,6 +135,28 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
     }
   };
 
+  const handleSaveFeatures = async () => {
+    if (!camera) return;
+    setSaving(true);
+    try {
+      await onUpdate(camera.id, {
+        name: formData.name,
+        location: formData.location,
+        rtsp_url: formData.rtsp_url,
+        fps: formData.fps,
+        features: {
+          ...formData.features,
+          tracking_classes: formData.tracking_classes,
+          speed_classes: formData.speed_classes,
+          distance_classes: formData.distance_classes
+        },
+        active_models: formData.active_models
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!camera || !confirm('Delete this camera?')) return;
     await onDelete(camera.id);

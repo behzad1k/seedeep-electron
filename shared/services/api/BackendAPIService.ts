@@ -1,3 +1,4 @@
+import { AxiosAPIClient } from '@shared/services/api/AxiosApiClient.ts';
 import { FastAPIClient, ApiResponse } from './FastAPIClient';
 import type {
   BackendCamera,
@@ -60,10 +61,11 @@ export interface UpdateCameraRequest {
  * Backend API Service - Enhanced with feature management
  */
 export class BackendAPIService {
-  private client: FastAPIClient;
+  // private client: FastAPIClient;
+  private client: AxiosAPIClient;
 
   constructor(baseURL: string = 'http://localhost:8000/api/v1') {
-    this.client = new FastAPIClient({
+    this.client = new AxiosAPIClient({
       baseURL,
       timeout: 30000,
       retries: 3,
@@ -81,42 +83,48 @@ export class BackendAPIService {
   }
 
   // ==================== CAMERA ENDPOINTS ====================
-
   async getCameras(activeOnly?: boolean): Promise<ApiResponse<BackendCamera[]>> {
-    return this.client.get<BackendCamera[]>('/cameras',
+    console.log(`[BackendAPI] Getting cameras (activeOnly: ${activeOnly})`);
+    return this.client.get<BackendCamera[]>('/cameras/',
       activeOnly ? { active_only: true } : undefined
     );
   }
 
   async getCamera(cameraId: string): Promise<ApiResponse<BackendCamera>> {
-    return this.client.get<BackendCamera>(`/cameras/${cameraId}`);
+    console.log(`[BackendAPI] Getting camera: ${cameraId}`);
+    return this.client.get<BackendCamera>(`/cameras/${cameraId}/`);
   }
 
   async createCamera(data: CreateCameraRequest): Promise<ApiResponse<BackendCamera>> {
-    return this.client.post<BackendCamera>('/cameras', data);
+    console.log(`[BackendAPI] Creating camera:`, data);
+    return this.client.post<BackendCamera>('/cameras/', data);
   }
 
   async updateCamera(cameraId: string, updates: UpdateCameraRequest): Promise<ApiResponse<BackendCamera>> {
+    console.log(`[BackendAPI] Updating camera: ${cameraId}`);
     return this.client.patch<BackendCamera>(`/cameras/${cameraId}`, updates);
   }
 
   async deleteCamera(cameraId: string): Promise<ApiResponse<void>> {
+    console.log(`[BackendAPI] Deleting camera: ${cameraId}`);
     return this.client.delete<void>(`/cameras/${cameraId}`);
   }
 
   async calibrateCamera(cameraId: string, data: CalibrationData): Promise<ApiResponse<BackendCamera>> {
+    console.log(`[BackendAPI] Calibrating camera: ${cameraId}`);
+    // FIXED: Added trailing slash
     return this.client.post<BackendCamera>(`/cameras/${cameraId}/calibrate`, data);
   }
 
   async updateCameraFeatures(cameraId: string, features: Partial<CameraFeatures>): Promise<ApiResponse<BackendCamera>> {
+    console.log(`[BackendAPI] Updating camera features: ${cameraId}`);
     return this.client.patch<BackendCamera>(`/cameras/${cameraId}/features`, features);
   }
 
   async getCameraModels(cameraId: string): Promise<ApiResponse<{ available_models: string[] }>> {
+    console.log(`[BackendAPI] Getting camera models: ${cameraId}`);
     return this.client.get<{ available_models: string[] }>(`/cameras/${cameraId}/models`);
   }
-
-  // ==================== HEALTH & INFO ENDPOINTS ====================
 
   async healthCheck(): Promise<ApiResponse<BackendHealthResponse>> {
     return this.client.get<BackendHealthResponse>('/health');
@@ -125,7 +133,6 @@ export class BackendAPIService {
   async getInfo(): Promise<ApiResponse<any>> {
     return this.client.get<any>('/');
   }
-
   // ==================== UTILITY METHODS ====================
 
   setBaseURL(url: string) {

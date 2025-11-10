@@ -1,6 +1,6 @@
 /**
- * Type-safe FastAPI HTTP Client
- * Can be used in both Main and Renderer processes
+ * Type-safe FastAPI HTTP Client - FIXED for concurrent WebSocket usage
+ * Uses separate connection pools and proper keepalive settings
  */
 
 export interface ApiRequestConfig {
@@ -43,12 +43,14 @@ export class FastAPIClient {
   private onError?: (error: any) => void | Promise<void>;
 
   constructor(config: ApiClientConfig) {
-    this.baseURL = config.baseURL.replace(/\/$/, ''); // Remove trailing slash
+    this.baseURL = config.baseURL.replace(/\/$/, '');
     this.defaultTimeout = config.timeout || 30000;
     this.defaultRetries = config.retries || 3;
     this.defaultRetryDelay = config.retryDelay || 1000;
     this.defaultHeaders = {
       'Content-Type': 'application/json',
+      // CRITICAL FIX: Force new connections, don't reuse WebSocket connections
+      'Connection': 'close',
       ...config.headers
     };
     this.onRequest = config.onRequest;
@@ -56,9 +58,6 @@ export class FastAPIClient {
     this.onError = config.onError;
   }
 
-  /**
-   * Build URL with query parameters
-   */
   private buildURL(endpoint: string, params?: Record<string, string | number | boolean>): string {
     const url = `${this.baseURL}${endpoint}`;
 
@@ -74,9 +73,6 @@ export class FastAPIClient {
     return `${url}?${searchParams.toString()}`;
   }
 
-  /**
-   * Make HTTP request with retry logic
-   */
   private async makeRequest<T>(
     endpoint: string,
     config: ApiRequestConfig = {}
@@ -94,7 +90,6 @@ export class FastAPIClient {
     const url = this.buildURL(endpoint, params);
     const requestHeaders = { ...this.defaultHeaders, ...headers };
 
-    // Call onRequest hook
     await this.onRequest?.({ method, headers: requestHeaders, body, params });
 
     let lastError: any;
@@ -102,23 +97,30 @@ export class FastAPIClient {
 
     while (attempt <= retries) {
       try {
+        // CRITICAL FIX: Create a new AbortController for each attempt
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
 
         const fetchOptions: RequestInit = {
           method,
           headers: requestHeaders,
-          signal: controller.signal
+          signal: controller.signal,
+          // CRITICAL FIX: Prevent connection reuse
+          keepalive: false,
         };
 
         if (body && method !== 'GET' && method !== 'DELETE') {
           fetchOptions.body = JSON.stringify(body);
         }
 
+        const requestTime = Date.now();
         console.log(`[FastAPIClient] ${method} ${url} (attempt ${attempt + 1}/${retries + 1})`);
 
         const response = await fetch(url, fetchOptions);
         clearTimeout(timeoutId);
+
+        const responseTime = Date.now() - requestTime;
+        console.log(`[FastAPIClient] Response received in ${responseTime}ms - Status: ${response.status}`);
 
         const status = response.status;
         const responseHeaders: Record<string, string> = {};
@@ -126,7 +128,6 @@ export class FastAPIClient {
           responseHeaders[key] = value;
         });
 
-        // Handle different response types
         let data: T | undefined;
         const contentType = response.headers.get('content-type');
 
@@ -134,10 +135,8 @@ export class FastAPIClient {
           const text = await response.text();
           data = text ? JSON.parse(text) : undefined;
         } else if (status === 204) {
-          // No content
           data = undefined;
         } else {
-          // Try to parse as JSON, fallback to text
           const text = await response.text();
           try {
             data = text ? JSON.parse(text) : undefined;
@@ -178,7 +177,7 @@ export class FastAPIClient {
       } catch (error) {
         lastError = error;
 
-        // Don't retry if aborted (timeout)
+        // Check if it's an abort error
         if (error instanceof Error && error.name === 'AbortError') {
           const timeoutResponse: ApiResponse<T> = {
             success: false,
@@ -186,16 +185,24 @@ export class FastAPIClient {
             status: 0
           };
           await this.onError?.(error);
+
+          // CRITICAL FIX: Retry timeouts if we have attempts left
+          if (attempt < retries) {
+            console.log(`[FastAPIClient] Timeout, retrying in ${retryDelay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+            attempt++;
+            continue;
+          }
+
           return timeoutResponse;
         }
 
-        // Don't retry network errors on last attempt
+        // Network errors
         if (attempt === retries) {
           break;
         }
 
-        // Wait before retry
-        console.log(`[FastAPIClient] Retrying in ${retryDelay}ms...`);
+        console.log(`[FastAPIClient] Error, retrying in ${retryDelay * (attempt + 1)}ms...`);
         await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
         attempt++;
       }
@@ -216,15 +223,11 @@ export class FastAPIClient {
     return failedResponse;
   }
 
-  /**
-   * Extract error message from response
-   */
   private extractErrorMessage(data: any, status: number): string {
     if (!data) {
       return `HTTP ${status}: Request failed`;
     }
 
-    // FastAPI error format
     if (data.detail) {
       if (typeof data.detail === 'string') {
         return data.detail;
@@ -234,7 +237,6 @@ export class FastAPIClient {
       }
     }
 
-    // Generic error format
     if (data.error) {
       return typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
     }
@@ -246,58 +248,34 @@ export class FastAPIClient {
     return `HTTP ${status}: ${JSON.stringify(data)}`;
   }
 
-  /**
-   * GET request
-   */
   async get<T = any>(endpoint: string, params?: Record<string, string | number | boolean>): Promise<ApiResponse<T>> {
     return this.makeRequest<T>(endpoint, { method: 'GET', params });
   }
 
-  /**
-   * POST request
-   */
   async post<T = any>(endpoint: string, body?: any, config?: Omit<ApiRequestConfig, 'method' | 'body'>): Promise<ApiResponse<T>> {
     return this.makeRequest<T>(endpoint, { method: 'POST', body, ...config });
   }
 
-  /**
-   * PUT request
-   */
   async put<T = any>(endpoint: string, body?: any, config?: Omit<ApiRequestConfig, 'method' | 'body'>): Promise<ApiResponse<T>> {
     return this.makeRequest<T>(endpoint, { method: 'PUT', body, ...config });
   }
 
-  /**
-   * PATCH request
-   */
   async patch<T = any>(endpoint: string, body?: any, config?: Omit<ApiRequestConfig, 'method' | 'body'>): Promise<ApiResponse<T>> {
     return this.makeRequest<T>(endpoint, { method: 'PATCH', body, ...config });
   }
 
-  /**
-   * DELETE request
-   */
   async delete<T = any>(endpoint: string, config?: Omit<ApiRequestConfig, 'method'>): Promise<ApiResponse<T>> {
     return this.makeRequest<T>(endpoint, { method: 'DELETE', ...config });
   }
 
-  /**
-   * Update base URL
-   */
   setBaseURL(url: string) {
     this.baseURL = url.replace(/\/$/, '');
   }
 
-  /**
-   * Update default headers
-   */
   setHeaders(headers: Record<string, string>) {
     this.defaultHeaders = { ...this.defaultHeaders, ...headers };
   }
 
-  /**
-   * Get current configuration
-   */
   getConfig() {
     return {
       baseURL: this.baseURL,

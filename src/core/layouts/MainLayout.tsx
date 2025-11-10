@@ -71,6 +71,7 @@ const MainLayout: React.FC = () => {
             'ppeDetection': 'ppe_detection',
             'personDetection': 'person_detection',
             'generalDetection': 'general_detection',
+            'capDetection': 'cap_detection',
             'fireDetection': 'fire_detection',
             'weaponDetection': 'weapon_detection'
           };

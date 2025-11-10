@@ -38,6 +38,7 @@ export interface Camera {
     ppeDetection: boolean;
     capDetection: boolean;
     generalDetection: boolean;
+    faceDetection: boolean;
     fireDetection: boolean;
     weaponDetection: boolean;
   };
@@ -90,7 +91,7 @@ export interface CameraFormData {
 
 export type GridSize = '2x2' | '3x3' | '4x4' | '5x5';
 
-export type DetectionModelKey = 'ppeDetection' | 'capDetection' | 'generalDetection' | 'fireDetection' | 'weaponDetection';
+export type DetectionModelKey = 'face_detection' | 'ppeDetection' | 'capDetection' | 'generalDetection' | 'fireDetection' | 'weaponDetection';
 
 export interface ConnectionTestResult {
   success: boolean;
