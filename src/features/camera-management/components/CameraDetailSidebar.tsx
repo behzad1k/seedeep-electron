@@ -2,19 +2,16 @@
 // FRONTEND FIXES - CameraDetailSidebar.tsx
 // ============================================
 
-/*
-Replace the entire CameraDetailSidebar.tsx with this updated version:
-*/
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Drawer, Box, Tabs, Tab, Typography, IconButton, TextField, Button,
   Switch, FormControlLabel, Accordion, AccordionSummary, AccordionDetails,
-  Checkbox, FormGroup, Alert, Chip, Paper, Divider, List, ListItem, ListItemText
+  Checkbox, FormGroup, Alert, Chip, Paper, Divider, List, ListItem, ListItemText,
+  RadioGroup, Radio, FormControl, FormLabel, CircularProgress, Card, CardContent
 } from '@mui/material';
 import {
   Close, Info, Speed, Timeline, Straighten, Article, ExpandMore,
-  Save, Delete, Visibility
+  Save, Delete, Visibility, Tune, CameraAlt, Refresh
 } from '@mui/icons-material';
 import { useTheme } from '@/contexts/ThemeContext';
 import { BackendCamera } from '@shared/types';
@@ -34,6 +31,13 @@ interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
   value: number;
+}
+
+interface CalibrationPoint {
+  pixel_x: number;
+  pixel_y: number;
+  real_x: number;
+  real_y: number;
 }
 
 const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
@@ -140,6 +144,17 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
   const [currentFrame, setCurrentFrame] = useState<any>(null);
   const [saving, setSaving] = useState(false);
 
+  // Calibration state
+  const [calibrationMode, setCalibrationMode] = useState<'reference_object' | 'perspective' | 'vanishing_point'>('reference_object');
+  const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
+  const [calibrationFrame, setCalibrationFrame] = useState<string | null>(null);
+  const [loadingFrame, setLoadingFrame] = useState(false);
+  const [calibrating, setCalibrating] = useState(false);
+  const [referenceDistance, setReferenceDistance] = useState('');
+  const [referenceHeight, setReferenceHeight] = useState('');
+  const [testResult, setTestResult] = useState<any>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+
   useEffect(() => {
     if (camera) {
       setFormData({
@@ -229,6 +244,423 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
     }));
   };
 
+  // ==================== CALIBRATION FUNCTIONS ====================
+
+  const loadCalibrationFrame = async () => {
+    if (!camera) return;
+
+    setLoadingFrame(true);
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/cameras/${camera.id}/frame`);
+      const data = await response.json();
+
+      if (data.success) {
+        setCalibrationFrame(data.frame);
+      } else {
+        alert('Failed to load frame: ' + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error loading frame:', error);
+      alert('Failed to load camera frame');
+    } finally {
+      setLoadingFrame(false);
+    }
+  };
+
+  const handleImageClick = (event: React.MouseEvent<HTMLImageElement>) => {
+    if (!imageRef.current || !calibrationFrame) return;
+
+    const rect = imageRef.current.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+
+    // Scale to actual image coordinates
+    const scaleX = imageRef.current.naturalWidth / rect.width;
+    const scaleY = imageRef.current.naturalHeight / rect.height;
+
+    const actualX = clickX * scaleX;
+    const actualY = clickY * scaleY;
+
+    const newPoint: CalibrationPoint = {
+      pixel_x: actualX,
+      pixel_y: actualY,
+      real_x: 0,
+      real_y: 0
+    };
+
+    setCalibrationPoints(prev => [...prev, newPoint]);
+  };
+
+  const clearCalibrationPoints = () => {
+    setCalibrationPoints([]);
+    setTestResult(null);
+  };
+
+  const testCalibration = async () => {
+    if (!camera || calibrationPoints.length < 2) {
+      alert('Need at least 2 points for calibration');
+      return;
+    }
+
+    if (!referenceDistance) {
+      alert('Please enter reference distance');
+      return;
+    }
+
+    try {
+      const calibrationData = {
+        mode: 'reference_object',
+        points: [
+          { ...calibrationPoints[0], real_x: 0, real_y: 0 },
+          { ...calibrationPoints[1], real_x: parseFloat(referenceDistance), real_y: 0 }
+        ],
+        reference_width_meters: parseFloat(referenceDistance)
+      };
+
+      const response = await fetch(
+        `http://localhost:8000/api/v1/cameras/${camera.id}/calibration/test`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(calibrationData)
+        }
+      );
+
+      const result = await response.json();
+      setTestResult(result);
+    } catch (error) {
+      console.error('Error testing calibration:', error);
+      alert('Failed to test calibration');
+    }
+  };
+
+  const saveCalibration = async () => {
+    if (!camera || !testResult?.success) {
+      alert('Please test calibration first');
+      return;
+    }
+
+    setCalibrating(true);
+    try {
+      const calibrationData = {
+        mode: 'reference_object',
+        points: [
+          { ...calibrationPoints[0], real_x: 0, real_y: 0 },
+          { ...calibrationPoints[1], real_x: parseFloat(referenceDistance), real_y: 0 }
+        ],
+        reference_width_meters: parseFloat(referenceDistance)
+      };
+
+      await onCalibrate(camera.id, calibrationData);
+
+      alert('Calibration saved successfully!');
+      clearCalibrationPoints();
+      setCalibrationFrame(null);
+    } catch (error) {
+      console.error('Error saving calibration:', error);
+      alert('Failed to save calibration');
+    } finally {
+      setCalibrating(false);
+    }
+  };
+
+  const clearCalibration = async () => {
+    if (!camera || !confirm('Clear camera calibration?')) return;
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/v1/cameras/${camera.id}/calibration`,
+        { method: 'DELETE' }
+      );
+
+      if (response.ok) {
+        alert('Calibration cleared successfully');
+        window.location.reload();
+      } else {
+        alert('Failed to clear calibration');
+      }
+    } catch (error) {
+      console.error('Error clearing calibration:', error);
+      alert('Failed to clear calibration');
+    }
+  };
+
+  const calculatePixelsPerMeter = () => {
+    if (calibrationPoints.length < 2 || !referenceDistance) return null;
+
+    const p1 = calibrationPoints[0];
+    const p2 = calibrationPoints[1];
+
+    const pixelDist = Math.sqrt(
+      Math.pow(p2.pixel_x - p1.pixel_x, 2) +
+      Math.pow(p2.pixel_y - p1.pixel_y, 2)
+    );
+
+    return pixelDist / parseFloat(referenceDistance);
+  };
+
+  // ==================== RENDER FUNCTIONS ====================
+
+  const renderCalibrationTab = () => (
+    <Box>
+      <Typography variant="h6" gutterBottom>Camera Calibration</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Calibrate the camera to enable real-world measurements (speed, distance)
+      </Typography>
+
+      {/* Current Status */}
+      <Card sx={{ mb: 3, bgcolor: camera?.is_calibrated ? 'success.dark' : 'warning.dark' }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box>
+              <Typography variant="subtitle1" fontWeight="bold">
+                {camera?.is_calibrated ? '✅ Calibrated' : '⚠️ Not Calibrated'}
+              </Typography>
+              {camera?.is_calibrated && (
+                <>
+                  <Typography variant="body2">
+                    Pixels per meter: {camera.pixels_per_meter?.toFixed(2)}
+                  </Typography>
+                  <Typography variant="body2">
+                    Mode: {camera.calibration_mode}
+                  </Typography>
+                </>
+              )}
+            </Box>
+            {camera?.is_calibrated && (
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                onClick={clearCalibration}
+              >
+                Clear
+              </Button>
+            )}
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Calibration Method Selection */}
+      <FormControl component="fieldset" sx={{ mb: 3 }}>
+        <FormLabel component="legend">Calibration Method</FormLabel>
+        <RadioGroup
+          value={calibrationMode}
+          onChange={(e) => setCalibrationMode(e.target.value as any)}
+        >
+          <FormControlLabel
+            value="reference_object"
+            control={<Radio />}
+            label={
+              <Box>
+                <Typography variant="body2" fontWeight="bold">Reference Object</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Mark two points on an object with known distance
+                </Typography>
+              </Box>
+            }
+          />
+          <FormControlLabel
+            value="perspective"
+            control={<Radio />}
+            label={
+              <Box>
+                <Typography variant="body2" fontWeight="bold">Perspective Transform</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Mark 4 corners of a known rectangular area (Coming Soon)
+                </Typography>
+              </Box>
+            }
+            disabled
+          />
+          <FormControlLabel
+            value="vanishing_point"
+            control={<Radio />}
+            label={
+              <Box>
+                <Typography variant="body2" fontWeight="bold">Vanishing Point</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Use parallel lines and known height (Coming Soon)
+                </Typography>
+              </Box>
+            }
+            disabled
+          />
+        </RadioGroup>
+      </FormControl>
+
+      <Divider sx={{ my: 3 }} />
+
+      {/* Reference Object Method */}
+      {calibrationMode === 'reference_object' && (
+        <Box>
+          <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+            Step 1: Capture Frame
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={loadingFrame ? <CircularProgress size={16} /> : <CameraAlt />}
+            onClick={loadCalibrationFrame}
+            disabled={loadingFrame}
+            fullWidth
+            sx={{ mb: 3 }}
+          >
+            {loadingFrame ? 'Loading...' : 'Capture Frame from Camera'}
+          </Button>
+
+          {calibrationFrame && (
+            <>
+              <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                Step 2: Mark Reference Points
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Click two points that are a known distance apart (e.g., width of a door, length of a table)
+              </Typography>
+
+              <Paper sx={{ p: 2, mb: 2, position: 'relative' }}>
+                <img
+                  ref={imageRef}
+                  src={`data:image/jpeg;base64,${calibrationFrame}`}
+                  alt="Calibration frame"
+                  style={{
+                    width: '100%',
+                    cursor: 'crosshair',
+                    display: 'block'
+                  }}
+                  onClick={handleImageClick}
+                />
+
+                {/* Draw points */}
+                {calibrationPoints.map((point, idx) => {
+                  if (!imageRef.current) return null;
+
+                  const rect = imageRef.current.getBoundingClientRect();
+                  const scaleX = rect.width / imageRef.current.naturalWidth;
+                  const scaleY = rect.height / imageRef.current.naturalHeight;
+
+                  return (
+                    <Box
+                      key={idx}
+                      sx={{
+                        position: 'absolute',
+                        left: point.pixel_x * scaleX,
+                        top: point.pixel_y * scaleY,
+                        width: 16,
+                        height: 16,
+                        borderRadius: '50%',
+                        backgroundColor: 'red',
+                        border: '3px solid white',
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 10,
+                        pointerEvents: 'none'
+                      }}
+                    >
+                      <Typography
+                        sx={{
+                          position: 'absolute',
+                          top: -30,
+                          left: -10,
+                          color: 'white',
+                          backgroundColor: 'rgba(0,0,0,0.8)',
+                          px: 1,
+                          py: 0.5,
+                          borderRadius: 1,
+                          fontSize: '14px',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        {idx + 1}
+                      </Typography>
+                    </Box>
+                  );
+                })}
+              </Paper>
+
+              <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
+                <Chip
+                  label={`Points: ${calibrationPoints.length}/2`}
+                  color={calibrationPoints.length === 2 ? 'success' : 'default'}
+                />
+                {calibrationPoints.length > 0 && (
+                  <Button size="small" onClick={clearCalibrationPoints}>
+                    Clear Points
+                  </Button>
+                )}
+              </Box>
+
+              {calibrationPoints.length >= 2 && (
+                <>
+                  <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                    Step 3: Enter Reference Distance
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    label="Distance between points (meters)"
+                    type="number"
+                    value={referenceDistance}
+                    onChange={(e) => setReferenceDistance(e.target.value)}
+                    placeholder="e.g., 2.0"
+                    helperText="Enter the real-world distance in meters"
+                    sx={{ mb: 2 }}
+                  />
+
+                  {referenceDistance && (
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                      Estimated: {calculatePixelsPerMeter()?.toFixed(2)} pixels/meter
+                    </Alert>
+                  )}
+
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Button
+                      variant="outlined"
+                      onClick={testCalibration}
+                      fullWidth
+                      startIcon={<Visibility />}
+                      disabled={!referenceDistance}
+                    >
+                      Test Calibration
+                    </Button>
+                    <Button
+                      variant="contained"
+                      onClick={saveCalibration}
+                      fullWidth
+                      disabled={!testResult?.success || calibrating}
+                      startIcon={calibrating ? <CircularProgress size={16} /> : <Save />}
+                    >
+                      {calibrating ? 'Saving...' : 'Save Calibration'}
+                    </Button>
+                  </Box>
+
+                  {testResult && (
+                    <Alert
+                      severity={testResult.success ? 'success' : 'error'}
+                      sx={{ mt: 2 }}
+                    >
+                      {testResult.success ? (
+                        <>
+                          <Typography variant="body2" fontWeight="bold">
+                            Test Successful!
+                          </Typography>
+                          <Typography variant="body2">
+                            Pixels per meter: {testResult.pixels_per_meter?.toFixed(2)}
+                          </Typography>
+                        </>
+                      ) : (
+                        <Typography variant="body2">
+                          Test failed: {testResult.error}
+                        </Typography>
+                      )}
+                    </Alert>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </Box>
+      )}
+    </Box>
+  );
+
   if (!camera) return null;
 
   const content = (
@@ -263,6 +695,7 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
         <Tab icon={<Timeline />} label="Tracking" />
         <Tab icon={<Speed />} label="Speed" />
         <Tab icon={<Straighten />} label="Distance" />
+        <Tab icon={<Tune />} label="Calibration" />
         <Tab icon={<Article />} label="Logs" />
       </Tabs>
 
@@ -620,9 +1053,11 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
         </Button>
       </TabPanel>
 
-      {/* Tab 5: Logs (ENHANCED) */}
-
       <TabPanel value={activeTab} index={5}>
+        {renderCalibrationTab()}
+      </TabPanel>
+
+      <TabPanel value={activeTab} index={6}>
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {/* Live Stats Summary */}
           <Paper sx={{ p: 2, bgcolor: 'background.default', borderLeft: 3, borderColor: 'primary.main' }}>
