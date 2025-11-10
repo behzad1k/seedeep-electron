@@ -21,8 +21,6 @@ interface DetectionBox {
   label: string;
 }
 
-
-
 interface TrackedObject {
   track_id: string;
   class_name: string;
@@ -30,13 +28,14 @@ interface TrackedObject {
   centroid: [number, number];
   confidence: number;
   age: number;
-  time_in_frame_seconds?: number;  // NEW: Time in seconds
-  time_in_frame_frames?: number;   // Frames count
+  time_in_frame_seconds?: number;
+  time_in_frame_frames?: number;
   speed_kmh?: number;
   speed_m_per_sec?: number;
   distance_from_camera_m?: number;
   distance_from_camera_ft?: number;
 }
+
 interface FrameData {
   frame: string;
   timestamp: number;
@@ -87,7 +86,6 @@ export const CameraFeed = memo<CameraFeedProps>(({
   const normalizedCameraId = String(cameraId);
 
   // OPTIMIZED: Draw frame and annotations together
-
   const drawFrameWithAnnotations = useCallback(() => {
     if (!canvasRef.current || !mountedRef.current || !currentFrameRef.current) {
       return;
@@ -134,15 +132,14 @@ export const CameraFeed = memo<CameraFeedProps>(({
           ctx.save();
           ctx.globalAlpha = 1.0;
 
-          // NEW: Build a map of tracked objects by their bounding box
-          // This will help us merge detections with tracking
+          // Build a map of tracked objects by their bounding box
           const trackedBBoxMap = new Map();
           annotations.trackedObjects.forEach((obj) => {
             const key = `${Math.round(obj.bbox[0])},${Math.round(obj.bbox[1])},${Math.round(obj.bbox[2])},${Math.round(obj.bbox[3])}`;
             trackedBBoxMap.set(key, obj);
           });
 
-          // NEW: Draw detections (but skip if they match a tracked object)
+          // Draw detections (but skip if they match a tracked object)
           annotations.detections.forEach((det) => {
             const detKey = `${Math.round(det.x1)},${Math.round(det.y1)},${Math.round(det.x2)},${Math.round(det.y2)}`;
 
@@ -171,7 +168,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
             ctx.fillText(label, det.x1 + 5, det.y1 - 5);
           });
 
-          // NEW: Draw tracked objects with ENHANCED labels
+          // Draw tracked objects with ENHANCED labels
           annotations.trackedObjects.forEach((obj) => {
             const [x1, y1, x2, y2] = obj.bbox;
 
@@ -186,7 +183,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
             ctx.arc(obj.centroid[0], obj.centroid[1], 5, 0, 2 * Math.PI);
             ctx.fill();
 
-            // NEW: Build comprehensive label with class name, ID, and time
+            // Build comprehensive label
             const labels = [];
 
             // Line 1: Class name and ID
@@ -196,10 +193,10 @@ export const CameraFeed = memo<CameraFeedProps>(({
             if (obj.time_in_frame_seconds !== undefined) {
               labels.push(`Time: ${obj.time_in_frame_seconds.toFixed(1)}s`);
             } else if (obj.age) {
-              // Fallback if backend doesn't send time_in_frame_seconds
               const seconds = (obj.age / 30).toFixed(1);
               labels.push(`Time: ${seconds}s`);
             }
+
             // Line 3: Speed (if available)
             if (obj.speed_kmh) {
               labels.push(`Speed: ${obj.speed_kmh.toFixed(1)} km/h`);
@@ -248,19 +245,15 @@ export const CameraFeed = memo<CameraFeedProps>(({
     }
   }, [renderDetections, normalizedCameraId]);
 
-
   const scheduleRender = useCallback(() => {
     if (!mountedRef.current || !isActiveRef.current) {
       return;
     }
 
-    // Backend already limits FPS, so just render immediately
     requestAnimationFrame(() => {
       drawFrameWithAnnotations();
     });
   }, [normalizedCameraId, drawFrameWithAnnotations]);
-
-  // OPTIMIZED: Handle WebSocket messages
 
   const handleMessage = useCallback((data: any) => {
     if (!isActiveRef.current || !mountedRef.current || !isVisible) {
@@ -339,8 +332,8 @@ export const CameraFeed = memo<CameraFeedProps>(({
           centroid: obj.centroid,
           confidence: obj.confidence,
           age: obj.age,
-          time_in_frame_seconds: obj.time_in_frame_seconds,  // NEW
-          time_in_frame_frames: obj.time_in_frame_frames,    // NEW
+          time_in_frame_seconds: obj.time_in_frame_seconds,
+          time_in_frame_frames: obj.time_in_frame_frames,
           speed_kmh: obj.speed_kmh,
           speed_m_per_sec: obj.speed_m_per_sec,
           distance_from_camera_m: obj.distance_from_camera_m,
@@ -368,32 +361,23 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
   }, [isVisible, normalizedCameraId, onFrame, renderDetections, scheduleRender]);
 
-
+  // CRITICAL FIX: Subscribe once on mount, manage with isActiveRef
   useEffect(() => {
-
-    if (!isVisible) {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-      }
-      isActiveRef.current = false;
-      return;
-    }
-
-    if (unsubscribeRef.current) {
-      return;
-    }
-
     mountedRef.current = true;
-    isActiveRef.current = true;
 
+    // CRITICAL FIX: Always subscribe on mount, control with isActiveRef
     const pool = WebSocketPool.getInstance();
     const cameraWsUrl = `${wsUrl.replace(/\/ws$/, '')}/ws/camera/${normalizedCameraId}`;
+
+    // Set initial active state
+    isActiveRef.current = isVisible;
 
     const timeoutId = setTimeout(() => {
       if (!mountedRef.current) {
         return;
       }
+
+      console.log(`[CameraFeed ${normalizedCameraId}] Subscribing to WebSocket (visible: ${isVisible})`);
 
       unsubscribeRef.current = pool.subscribe(
         cameraWsUrl,
@@ -412,6 +396,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
     }, 100);
 
     return () => {
+      console.log(`[CameraFeed ${normalizedCameraId}] Cleaning up`);
       clearTimeout(timeoutId);
       mountedRef.current = false;
       isActiveRef.current = false;
@@ -427,7 +412,24 @@ export const CameraFeed = memo<CameraFeedProps>(({
         unsubscribeRef.current = null;
       }
     };
-  }, [normalizedCameraId, wsUrl, isVisible, handleMessage, onError]);
+  }, [normalizedCameraId, wsUrl, handleMessage, onError]);
+
+  // CRITICAL FIX: Handle visibility changes without recreating connection
+  useEffect(() => {
+    console.log(`[CameraFeed ${normalizedCameraId}] Visibility changed to: ${isVisible}`);
+    isActiveRef.current = isVisible;
+
+    if (!isVisible) {
+      setIsConnected(false);
+      // Clear current frame when hidden
+      currentFrameRef.current = null;
+      annotationsRef.current = {
+        detections: [],
+        trackedObjects: [],
+        timestamp: 0
+      };
+    }
+  }, [isVisible, normalizedCameraId]);
 
   if (!isVisible) return null;
 
