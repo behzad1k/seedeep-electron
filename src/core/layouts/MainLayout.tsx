@@ -157,7 +157,7 @@ const MainLayout: React.FC = () => {
                       cameraId={camera.id}
                       targetFPS={20} // FIXED: Increased FPS
                       isVisible={!shouldHide} // FIXED: Feed updates when visible
-                      renderDetections={isExpanded}
+                      renderDetections={true}
                     />
 
                     {/* Camera Label */}

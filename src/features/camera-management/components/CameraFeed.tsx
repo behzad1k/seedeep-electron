@@ -46,7 +46,7 @@ interface AnnotationData {
 export const CameraFeed = memo<CameraFeedProps>(({
                                                    cameraId,
                                                    wsUrl = 'ws://localhost:8000',
-                                                   targetFPS = 20, // INCREASED default FPS
+                                                   targetFPS = 20,
                                                    onFrame,
                                                    onError,
                                                    isVisible = true,
@@ -59,7 +59,6 @@ export const CameraFeed = memo<CameraFeedProps>(({
   const mountedRef = useRef(true);
   const imageRef = useRef<HTMLImageElement | null>(null);
 
-  // OPTIMIZATION: Use OffscreenCanvas if available
   const offscreenCanvasRef = useRef<OffscreenCanvas | null>(null);
   const renderWorkerRef = useRef<Worker | null>(null);
 
@@ -87,30 +86,43 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
   // OPTIMIZATION: Throttled render function
   const scheduleRender = useCallback(() => {
-    if (!mountedRef.current || !isActiveRef.current) return;
+
+    if (!mountedRef.current || !isActiveRef.current) {
+      return;
+    }
 
     const now = performance.now();
     const minFrameTime = 1000 / targetFPS;
+    const timeSinceLastRender = now - lastRenderTime.current;
 
-    if (now - lastRenderTime.current < minFrameTime) {
-      // Skip this frame to maintain target FPS
+
+    if (timeSinceLastRender < minFrameTime) {
       return;
     }
 
     lastRenderTime.current = now;
-    requestAnimationFrame(() => drawFrameWithAnnotations());
-  }, [targetFPS]);
+
+    requestAnimationFrame(() => {
+      drawFrameWithAnnotations();
+    });
+  }, [targetFPS, normalizedCameraId]);
 
   // OPTIMIZED: Draw frame and annotations together
   const drawFrameWithAnnotations = useCallback(() => {
-    if (!canvasRef.current || !mountedRef.current || !currentFrameRef.current) return;
+
+    if (!canvasRef.current || !mountedRef.current || !currentFrameRef.current) {
+      return;
+    }
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d', {
       alpha: false,
-      desynchronized: true // OPTIMIZATION: Better performance
+      desynchronized: true
     });
-    if (!ctx) return;
+
+    if (!ctx) {
+      return;
+    }
 
     if (!imageRef.current) {
       imageRef.current = new Image();
@@ -120,7 +132,9 @@ export const CameraFeed = memo<CameraFeedProps>(({
     const frameData = currentFrameRef.current;
 
     img.onload = () => {
-      if (!mountedRef.current || !canvasRef.current) return;
+      if (!mountedRef.current || !canvasRef.current) {
+        return;
+      }
 
       // OPTIMIZATION: Only resize if needed
       if (canvas.width !== img.width || canvas.height !== img.height) {
@@ -131,33 +145,39 @@ export const CameraFeed = memo<CameraFeedProps>(({
       // Draw video frame
       ctx.drawImage(img, 0, 0);
 
-      // Draw annotations on top (only if enabled and fresh)
+      // Draw annotations on top (only if enabled)
       if (renderDetections) {
         const annotations = annotationsRef.current;
-        const annotationAge = Math.abs(annotations.timestamp - frameData.serverTime);
-        const isAnnotationFresh = annotationAge < 500;
 
-        if (isAnnotationFresh) {
+        const annotationAge = Math.abs(annotations.timestamp - frameData.serverTime);
+        const isAnnotationFresh = annotationAge < 2000; // Increased from 500ms to 2000ms
+
+        if (annotations.detections.length > 0 || annotations.trackedObjects.length > 0) {
           // OPTIMIZATION: Batch drawing operations
           ctx.save();
 
           // Draw detections
           ctx.globalAlpha = 1.0;
-          annotations.detections.forEach((det) => {
+
+          annotations.detections.forEach((det, idx) => {
+
             ctx.strokeStyle = '#00ff00';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(det.x1, det.y1, det.x2 - det.x1, det.y2 - det.y1);
+            ctx.lineWidth = 3;
+            const boxWidth = det.x2 - det.x1;
+            const boxHeight = det.y2 - det.y1;
+
+            ctx.strokeRect(det.x1, det.y1, boxWidth, boxHeight);
 
             const label = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
-            ctx.font = '14px Arial';
+            ctx.font = 'bold 16px Arial';
             const textMetrics = ctx.measureText(label);
-            const textHeight = 20;
+            const textHeight = 24;
 
-            ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-            ctx.fillRect(det.x1, det.y1 - textHeight, textMetrics.width + 8, textHeight);
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
+            ctx.fillRect(det.x1, det.y1 - textHeight, textMetrics.width + 12, textHeight);
 
             ctx.fillStyle = '#000';
-            ctx.fillText(label, det.x1 + 4, det.y1 - 6);
+            ctx.fillText(label, det.x1 + 6, det.y1 - 6);
           });
 
           // Draw tracked objects
@@ -207,6 +227,8 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
           ctx.restore();
         }
+      } else {
+        console.log(`[CameraFeed ${normalizedCameraId}] renderDetections is false`);
       }
     };
 
@@ -222,7 +244,9 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
   // OPTIMIZED: Handle WebSocket messages
   const handleMessage = useCallback((data: any) => {
-    if (!isActiveRef.current || !mountedRef.current || !isVisible) return;
+    if (!isActiveRef.current || !mountedRef.current || !isVisible) {
+      return;
+    }
 
     if (data.camera_id && String(data.camera_id) !== normalizedCameraId) {
       return;
@@ -257,29 +281,38 @@ export const CameraFeed = memo<CameraFeedProps>(({
       };
     }
 
-    // Extract detections
+    // FIXED: Extract detections from ALL models (excluding tracking)
     const currentDetections: DetectionBox[] = [];
-    if (data.results && renderDetections) {
-      Object.values(data.results).forEach((modelResult: any) => {
-        if (modelResult.detections && Array.isArray(modelResult.detections)) {
-          modelResult.detections.forEach((det: any) => {
-            currentDetections.push({
-              x1: det.x1,
-              y1: det.y1,
-              x2: det.x2,
-              y2: det.y2,
-              confidence: det.confidence,
-              label: det.label
-            });
-          });
-        }
-      });
+    if (data.results) {
+      if (renderDetections) {
+        Object.entries(data.results).forEach(([modelName, modelResult]: [string, any]) => {
+          if (modelName === 'tracking') {
+            return;
+          }
+
+          if (modelResult && typeof modelResult === 'object') {
+            if (Array.isArray(modelResult.detections)) {
+              modelResult.detections.forEach((det: any, idx: number) => {
+                currentDetections.push({
+                  x1: det.x1,
+                  y1: det.y1,
+                  x2: det.x2,
+                  y2: det.y2,
+                  confidence: det.confidence,
+                  label: det.label
+                });
+              });
+            }
+          }
+        });
+      }
     }
 
     // Extract tracked objects
     const trackedObjects: TrackedObject[] = [];
     if (data.results?.tracking?.tracked_objects) {
-      Object.values(data.results.tracking.tracked_objects).forEach((obj: any) => {
+      const trackingObjects = data.results.tracking.tracked_objects;
+      Object.values(trackingObjects).forEach((obj: any) => {
         trackedObjects.push({
           track_id: obj.track_id,
           class_name: obj.class_name,
@@ -305,15 +338,15 @@ export const CameraFeed = memo<CameraFeedProps>(({
       tracks: trackedObjects.length
     });
 
-    // OPTIMIZED: Schedule render instead of immediate draw
     if (data.frame) {
       scheduleRender();
     }
+
   }, [isVisible, normalizedCameraId, onFrame, renderDetections, scheduleRender]);
 
   useEffect(() => {
+
     if (!isVisible) {
-      // OPTIMIZATION: Disconnect when not visible
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
@@ -332,15 +365,17 @@ export const CameraFeed = memo<CameraFeedProps>(({
     const pool = WebSocketPool.getInstance();
     const cameraWsUrl = `${wsUrl.replace(/\/ws$/, '')}/ws/camera/${normalizedCameraId}`;
 
-    console.log(`[CameraFeed ${normalizedCameraId}] Connecting to:`, cameraWsUrl);
-
     const timeoutId = setTimeout(() => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        return;
+      }
 
       unsubscribeRef.current = pool.subscribe(
         cameraWsUrl,
         normalizedCameraId,
-        handleMessage,
+        (data) => {
+          handleMessage(data);
+        },
         (err) => {
           if (!mountedRef.current) return;
           console.error(`[CameraFeed ${normalizedCameraId}] WebSocket error:`, err);
@@ -352,7 +387,6 @@ export const CameraFeed = memo<CameraFeedProps>(({
     }, 100);
 
     return () => {
-      console.log(`[CameraFeed ${normalizedCameraId}] Cleanup`);
       clearTimeout(timeoutId);
       mountedRef.current = false;
       isActiveRef.current = false;
@@ -382,7 +416,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
           objectFit: 'contain',
           backgroundColor: '#000',
           display: isConnected ? 'block' : 'none',
-          imageRendering: 'crisp-edges' // OPTIMIZATION: Faster rendering
+          imageRendering: 'crisp-edges'
         }}
       />
 
