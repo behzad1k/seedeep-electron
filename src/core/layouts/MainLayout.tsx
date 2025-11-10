@@ -295,7 +295,7 @@ const MainLayout: React.FC = () => {
               </Box>
 
               {/* Details content */}
-              <Box sx={{ height: 'calc(60% - 88px)', overflow: 'auto' }}>
+              <Box sx={{ height: '100%', overflow: 'auto' }}>
                 <CameraDetailSidebar
                   open={true}
                   camera={expandedCamera}

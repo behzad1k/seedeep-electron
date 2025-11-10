@@ -16,6 +16,7 @@ export interface BackendCameraFeatures {
   tracking_classes: string[]
   speed_classes: string[]
   distance_classes: string[]
+  detection_classes: string[]
 }
 
 export interface BackendCamera {

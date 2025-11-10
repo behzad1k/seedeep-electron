@@ -117,6 +117,7 @@ export class AxiosAPIClient {
    */
   private createHttpsAgent() {
     try {
+
       const https = require('https');
       return new https.Agent({
         keepAlive: false,

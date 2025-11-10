@@ -21,16 +21,22 @@ interface DetectionBox {
   label: string;
 }
 
+
+
 interface TrackedObject {
   track_id: string;
   class_name: string;
   bbox: [number, number, number, number];
   centroid: [number, number];
   confidence: number;
+  age: number;
+  time_in_frame_seconds?: number;  // NEW: Time in seconds
+  time_in_frame_frames?: number;   // Frames count
   speed_kmh?: number;
   speed_m_per_sec?: number;
+  distance_from_camera_m?: number;
+  distance_from_camera_ft?: number;
 }
-
 interface FrameData {
   frame: string;
   timestamp: number;
@@ -70,10 +76,6 @@ export const CameraFeed = memo<CameraFeedProps>(({
     timestamp: 0
   });
 
-  // OPTIMIZATION: Track render performance
-  const lastRenderTime = useRef(0);
-  const renderQueue = useRef<FrameData[]>([]);
-
   // Track latency for sync
   const [latencyMs, setLatencyMs] = useState(0);
   const timeOffsetRef = useRef(0);
@@ -84,32 +86,9 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
   const normalizedCameraId = String(cameraId);
 
-  // OPTIMIZATION: Throttled render function
-  const scheduleRender = useCallback(() => {
-
-    if (!mountedRef.current || !isActiveRef.current) {
-      return;
-    }
-
-    const now = performance.now();
-    const minFrameTime = 1000 / targetFPS;
-    const timeSinceLastRender = now - lastRenderTime.current;
-
-
-    if (timeSinceLastRender < minFrameTime) {
-      return;
-    }
-
-    lastRenderTime.current = now;
-
-    requestAnimationFrame(() => {
-      drawFrameWithAnnotations();
-    });
-  }, [targetFPS, normalizedCameraId]);
-
   // OPTIMIZED: Draw frame and annotations together
-  const drawFrameWithAnnotations = useCallback(() => {
 
+  const drawFrameWithAnnotations = useCallback(() => {
     if (!canvasRef.current || !mountedRef.current || !currentFrameRef.current) {
       return;
     }
@@ -136,7 +115,6 @@ export const CameraFeed = memo<CameraFeedProps>(({
         return;
       }
 
-      // OPTIMIZATION: Only resize if needed
       if (canvas.width !== img.width || canvas.height !== img.height) {
         canvas.width = img.width;
         canvas.height = img.height;
@@ -150,41 +128,54 @@ export const CameraFeed = memo<CameraFeedProps>(({
         const annotations = annotationsRef.current;
 
         const annotationAge = Math.abs(annotations.timestamp - frameData.serverTime);
-        const isAnnotationFresh = annotationAge < 2000; // Increased from 500ms to 2000ms
+        const isAnnotationFresh = annotationAge < 2000;
 
         if (annotations.detections.length > 0 || annotations.trackedObjects.length > 0) {
-          // OPTIMIZATION: Batch drawing operations
           ctx.save();
-
-          // Draw detections
           ctx.globalAlpha = 1.0;
 
-          annotations.detections.forEach((det, idx) => {
+          // NEW: Build a map of tracked objects by their bounding box
+          // This will help us merge detections with tracking
+          const trackedBBoxMap = new Map();
+          annotations.trackedObjects.forEach((obj) => {
+            const key = `${Math.round(obj.bbox[0])},${Math.round(obj.bbox[1])},${Math.round(obj.bbox[2])},${Math.round(obj.bbox[3])}`;
+            trackedBBoxMap.set(key, obj);
+          });
 
+          // NEW: Draw detections (but skip if they match a tracked object)
+          annotations.detections.forEach((det) => {
+            const detKey = `${Math.round(det.x1)},${Math.round(det.y1)},${Math.round(det.x2)},${Math.round(det.y2)}`;
+
+            // Skip if this detection is also being tracked
+            if (trackedBBoxMap.has(detKey)) {
+              return;
+            }
+
+            // Draw simple detection box (green)
             ctx.strokeStyle = '#00ff00';
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 2;
             const boxWidth = det.x2 - det.x1;
             const boxHeight = det.y2 - det.y1;
 
             ctx.strokeRect(det.x1, det.y1, boxWidth, boxHeight);
 
             const label = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
-            ctx.font = 'bold 16px Arial';
+            ctx.font = 'bold 14px Arial';
             const textMetrics = ctx.measureText(label);
-            const textHeight = 24;
+            const textHeight = 20;
 
             ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
-            ctx.fillRect(det.x1, det.y1 - textHeight, textMetrics.width + 12, textHeight);
+            ctx.fillRect(det.x1, det.y1 - textHeight, textMetrics.width + 10, textHeight);
 
             ctx.fillStyle = '#000';
-            ctx.fillText(label, det.x1 + 6, det.y1 - 6);
+            ctx.fillText(label, det.x1 + 5, det.y1 - 5);
           });
 
-          // Draw tracked objects
+          // NEW: Draw tracked objects with ENHANCED labels
           annotations.trackedObjects.forEach((obj) => {
             const [x1, y1, x2, y2] = obj.bbox;
 
-            // Draw bounding box
+            // Draw bounding box (magenta for tracked)
             ctx.strokeStyle = '#ff00ff';
             ctx.lineWidth = 3;
             ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
@@ -195,44 +186,59 @@ export const CameraFeed = memo<CameraFeedProps>(({
             ctx.arc(obj.centroid[0], obj.centroid[1], 5, 0, 2 * Math.PI);
             ctx.fill();
 
-            // Draw tracking info
-            const trackLabel = `ID: ${obj.track_id}`;
-            const speedLabel = obj.speed_kmh
-              ? `${obj.speed_kmh.toFixed(1)} km/h`
-              : obj.speed_m_per_sec
-                ? `${obj.speed_m_per_sec.toFixed(2)} m/s`
-                : '';
+            // NEW: Build comprehensive label with class name, ID, and time
+            const labels = [];
 
-            ctx.font = 'bold 14px Arial';
-            const trackMetrics = ctx.measureText(trackLabel);
-            const textHeight = 20;
+            // Line 1: Class name and ID
+            labels.push(`${obj.class_name} [ID: ${obj.track_id}]`);
 
-            const boxWidth = Math.max(
-              trackMetrics.width,
-              speedLabel ? ctx.measureText(speedLabel).width : 0
-            ) + 8;
-            const boxHeight = textHeight * (speedLabel ? 2 : 1);
+            // Line 2: Time in frame
+            if (obj.time_in_frame_seconds !== undefined) {
+              labels.push(`Time: ${obj.time_in_frame_seconds.toFixed(1)}s`);
+            } else if (obj.age) {
+              // Fallback if backend doesn't send time_in_frame_seconds
+              const seconds = (obj.age / 30).toFixed(1);
+              labels.push(`Time: ${seconds}s`);
+            }
+            // Line 3: Speed (if available)
+            if (obj.speed_kmh) {
+              labels.push(`Speed: ${obj.speed_kmh.toFixed(1)} km/h`);
+            } else if (obj.speed_m_per_sec) {
+              labels.push(`Speed: ${obj.speed_m_per_sec.toFixed(2)} m/s`);
+            }
 
-            ctx.fillStyle = 'rgba(255, 0, 255, 0.8)';
+            // Line 4: Distance (if available)
+            if (obj.distance_from_camera_m !== undefined) {
+              labels.push(`Distance: ${obj.distance_from_camera_m.toFixed(2)}m`);
+            } else if (obj.distance_from_camera_ft !== undefined) {
+              labels.push(`Distance: ${obj.distance_from_camera_ft.toFixed(2)}ft`);
+            }
+
+            // Calculate label box size
+            ctx.font = 'bold 13px Arial';
+            const maxWidth = Math.max(...labels.map(l => ctx.measureText(l).width));
+            const lineHeight = 18;
+            const boxWidth = maxWidth + 12;
+            const boxHeight = lineHeight * labels.length + 4;
+
+            // Draw label background
+            ctx.fillStyle = 'rgba(255, 0, 255, 0.85)';
             ctx.fillRect(x1, y2 + 2, boxWidth, boxHeight);
 
+            // Draw labels
             ctx.fillStyle = '#fff';
-            ctx.fillText(trackLabel, x1 + 4, y2 + textHeight - 2);
-
-            if (speedLabel) {
-              ctx.font = '12px Arial';
-              ctx.fillText(speedLabel, x1 + 4, y2 + textHeight * 2 - 2);
-            }
+            ctx.font = 'bold 13px Arial';
+            labels.forEach((label, idx) => {
+              ctx.fillText(label, x1 + 6, y2 + lineHeight * (idx + 1) - 2);
+            });
           });
 
           ctx.restore();
         }
-      } else {
-        console.log(`[CameraFeed ${normalizedCameraId}] renderDetections is false`);
       }
     };
 
-    // OPTIMIZATION: Reuse image src if it's the same
+    // Reuse image src if it's the same
     const src = frameData.frame.startsWith('data:')
       ? frameData.frame
       : `data:image/jpeg;base64,${frameData.frame}`;
@@ -242,7 +248,20 @@ export const CameraFeed = memo<CameraFeedProps>(({
     }
   }, [renderDetections, normalizedCameraId]);
 
+
+  const scheduleRender = useCallback(() => {
+    if (!mountedRef.current || !isActiveRef.current) {
+      return;
+    }
+
+    // Backend already limits FPS, so just render immediately
+    requestAnimationFrame(() => {
+      drawFrameWithAnnotations();
+    });
+  }, [normalizedCameraId, drawFrameWithAnnotations]);
+
   // OPTIMIZED: Handle WebSocket messages
+
   const handleMessage = useCallback((data: any) => {
     if (!isActiveRef.current || !mountedRef.current || !isVisible) {
       return;
@@ -281,7 +300,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
       };
     }
 
-    // FIXED: Extract detections from ALL models (excluding tracking)
+    // Extract detections from ALL models (excluding tracking)
     const currentDetections: DetectionBox[] = [];
     if (data.results) {
       if (renderDetections) {
@@ -292,7 +311,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
 
           if (modelResult && typeof modelResult === 'object') {
             if (Array.isArray(modelResult.detections)) {
-              modelResult.detections.forEach((det: any, idx: number) => {
+              modelResult.detections.forEach((det: any) => {
                 currentDetections.push({
                   x1: det.x1,
                   y1: det.y1,
@@ -308,7 +327,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
       }
     }
 
-    // Extract tracked objects
+    // Extract tracked objects with FULL data including distance
     const trackedObjects: TrackedObject[] = [];
     if (data.results?.tracking?.tracked_objects) {
       const trackingObjects = data.results.tracking.tracked_objects;
@@ -319,8 +338,13 @@ export const CameraFeed = memo<CameraFeedProps>(({
           bbox: obj.bbox,
           centroid: obj.centroid,
           confidence: obj.confidence,
+          age: obj.age,
+          time_in_frame_seconds: obj.time_in_frame_seconds,  // NEW
+          time_in_frame_frames: obj.time_in_frame_frames,    // NEW
           speed_kmh: obj.speed_kmh,
-          speed_m_per_sec: obj.speed_m_per_sec
+          speed_m_per_sec: obj.speed_m_per_sec,
+          distance_from_camera_m: obj.distance_from_camera_m,
+          distance_from_camera_ft: obj.distance_from_camera_ft
         });
       });
     }
@@ -343,6 +367,7 @@ export const CameraFeed = memo<CameraFeedProps>(({
     }
 
   }, [isVisible, normalizedCameraId, onFrame, renderDetections, scheduleRender]);
+
 
   useEffect(() => {
 
