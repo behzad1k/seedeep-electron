@@ -1064,6 +1064,7 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
             <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
               📊 Live Statistics
             </Typography>
+            {/* <img width={200} height={200} src={currentFrame}/> */}
             {currentFrame && (() => {
               const stats = getCategoryStats(currentFrame);
               return (
