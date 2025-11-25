@@ -1,10 +1,7 @@
 /**
  * Axios-based HTTP Client for FastAPI
- * FIXES the WebSocket connection interference issue
- * Axios manages connections better than fetch when WebSockets are active
+ * Browser-compatible version (no Node.js dependencies)
  */
-
-// First, install axios: npm install axios
 
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 
@@ -42,7 +39,7 @@ export class AxiosAPIClient {
     this.onResponse = config.onResponse;
     this.onError = config.onError;
 
-    // CRITICAL FIX: Configure axios to NOT reuse connections with WebSockets
+    // Create axios instance with browser-compatible configuration
     this.client = axios.create({
       baseURL: config.baseURL,
       timeout: config.timeout || 30000,
@@ -50,13 +47,9 @@ export class AxiosAPIClient {
         'Content-Type': 'application/json',
         ...config.headers
       },
-      // CRITICAL: Use separate connection pool from WebSockets
-      httpAgent: typeof window === 'undefined' ? this.createHttpAgent() : undefined,
-      httpsAgent: typeof window === 'undefined' ? this.createHttpsAgent() : undefined,
-      // Don't follow redirects automatically
+      // Browser-compatible settings
       maxRedirects: 0,
-      // Validate status codes
-      validateStatus: (status) => status < 600, // Accept all status codes, we'll handle errors
+      validateStatus: (status) => status < 600,
     });
 
     // Request interceptor
@@ -77,7 +70,6 @@ export class AxiosAPIClient {
     this.client.interceptors.response.use(
       async (response) => {
         console.log(`[AxiosClient] Response ${response.status} from ${response.config.url}`);
-        console.log(response.data);
         const apiResponse: ApiResponse = {
           success: response.status >= 200 && response.status < 300,
           data: response.data,
@@ -93,40 +85,6 @@ export class AxiosAPIClient {
         return Promise.reject(error);
       }
     );
-  }
-
-  /**
-   * Create HTTP agent with separate connection pool (Node.js only)
-   */
-  private createHttpAgent() {
-    try {
-      // This will only work in Node.js (Electron main process)
-      const http = require('http');
-      return new http.Agent({
-        keepAlive: false, // CRITICAL: Don't keep connections alive
-        maxSockets: 10,   // Limit concurrent connections
-        maxFreeSockets: 0, // Don't keep free sockets
-      });
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * Create HTTPS agent with separate connection pool (Node.js only)
-   */
-  private createHttpsAgent() {
-    try {
-
-      const https = require('https');
-      return new https.Agent({
-        keepAlive: false,
-        maxSockets: 10,
-        maxFreeSockets: 0,
-      });
-    } catch {
-      return undefined;
-    }
   }
 
   /**
@@ -205,7 +163,6 @@ export class AxiosAPIClient {
    */
   async get<T = any>(endpoint: string, params?: Record<string, any>): Promise<ApiResponse<T>> {
     return this.makeRequestWithRetry(async () => {
-      console.log(endpoint);
       const response = await this.client.get<T>(endpoint, { params });
       return response.data;
     });
@@ -232,7 +189,7 @@ export class AxiosAPIClient {
   }
 
   /**
-   * PATCH request - CRITICAL for your update functionality
+   * PATCH request
    */
   async patch<T = any>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
     console.log(`[AxiosClient] ========================================`);

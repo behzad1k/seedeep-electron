@@ -8,9 +8,4 @@ export type {
 export type {
   CreateCameraRequest,
   UpdateCameraRequest,
-  CalibrationRequest,
-  ModelInfo,
-  ModelsResponse,
-  TrackingConfig,
-  TrackingStats
 } from './BackendAPIService';
