@@ -1,7 +1,8 @@
 import { BackendCamera, Camera, IpcResponse } from '@shared/types';
+import HLSStreamManager from '@utils/hls/HLSStreamManager.ts';
 import { WebSocketPool } from '@utils/websocket/WebsocketPool';
 import { useState, useCallback, useEffect, useRef } from 'react';
-
+const hlsManager = HLSStreamManager.getInstance('http://localhost:8081');
 export const useCameraManager = () => {
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null);
@@ -139,6 +140,13 @@ export const useCameraManager = () => {
 
         // Connect WebSocket for new camera
         const newCamera = transformCamera(response.data);
+        if (newCamera.rtsp_url) {
+          const hlsUrl = await hlsManager.startStream(newCamera.id, newCamera.rtsp_url);
+          if (hlsUrl) {
+            console.log(`✅ HLS stream available: ${hlsUrl}`);
+          }
+        }
+
         if (newCamera.status === 'online') {
           // connectCameraWebSocket(newCamera);
         }
@@ -194,7 +202,7 @@ export const useCameraManager = () => {
     try {
       // Disconnect WebSocket first
       disconnectCameraWebSocket(cameraId);
-
+      await hlsManager.stopStream(cameraId);
       const response: IpcResponse<void> = await window.electronAPI.camera.delete(cameraId);
 
       if (response.success) {

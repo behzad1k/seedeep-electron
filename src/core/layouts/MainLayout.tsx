@@ -1,7 +1,6 @@
 import { CameraGrid } from '@components/camera/CameraGrid.tsx';
 import { AppHeader } from '@components/layout/AppHeader.tsx';
 import { AppSidebar } from '@components/layout/AppSidebar.tsx';
-import { BackendHealthIndicator } from '@components/layout/BackendHealthIndicator.tsx';
 import { CameraDetailSidebar } from '@features/camera-management/components/CameraDetailSidebar.tsx';
 import AddCamera from '@features/camera-management/components/AddCamera.tsx';
 import { CameraFeed } from '@features/camera-management/components/CameraFeed.tsx';
