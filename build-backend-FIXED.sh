@@ -40,6 +40,10 @@ $PYTHON_CMD -m venv build/backend/python-env
 # Activate virtual environment
 source build/backend/python-env/bin/activate
 
+# CRITICAL: Unset system Python paths
+unset PYTHONPATH
+unset PYTHONHOME
+
 # Upgrade pip
 echo "⬆️ Upgrading pip..."
 pip install --upgrade pip
@@ -53,6 +57,10 @@ if [ $? -ne 0 ]; then
     deactivate
     exit 1
 fi
+
+# CRITICAL FIX: Reinstall torchvision to fix metadata issue
+echo "🔧 Fixing torchvision metadata..."
+pip install --force-reinstall --no-deps torchvision
 
 # Copy application files
 echo "📁 Copying application files..."
@@ -137,8 +145,8 @@ find build/backend/python-env/lib -name "__pycache__" -type d -exec rm -rf {} + 
 find build/backend/python-env/lib -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
 find build/backend/python-env/lib -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Create startup script for macOS with better error handling
-echo "📝 Creating startup script..."
+# Create startup script for macOS with FIXED Python isolation
+echo "📝 Creating startup script with Python isolation fix..."
 cat > build/backend/start-backend << 'SCRIPT_EOF'
 #!/bin/bash
 
@@ -167,6 +175,13 @@ if [ ! -f "$DIR/python-env/bin/activate" ]; then
     exit 1
 fi
 
+# CRITICAL FIX: Completely isolate the virtual environment from system Python
+# Unset ALL Python-related environment variables
+unset PYTHONPATH
+unset PYTHONHOME
+unset PYTHON_VERSION
+unset PYTHON_CONFIG
+
 # Activate virtual environment
 echo "🔧 Activating virtual environment..."
 source "$DIR/python-env/bin/activate"
@@ -178,10 +193,23 @@ fi
 
 echo "✅ Virtual environment activated"
 
-# Check Python
-which python3
+# Verify we're using the venv Python
+ACTIVE_PYTHON=$(which python3)
+echo "🐍 Active Python: $ACTIVE_PYTHON"
+
+# Check it's the venv python
+if [[ "$ACTIVE_PYTHON" != "$DIR/python-env/bin/python3" ]]; then
+    echo "⚠️  WARNING: Not using venv Python!"
+    echo "   Expected: $DIR/python-env/bin/python3"
+    echo "   Got: $ACTIVE_PYTHON"
+fi
+
 python3 --version
 echo "🐍 Python architecture: $(python3 -c 'import platform; print(platform.machine())')"
+
+# CRITICAL FIX: Force Python to use only the venv's site-packages
+export PYTHONNOUSERSITE=1  # Ignore user site-packages
+export PYTHONDONTWRITEBYTECODE=1  # Don't write .pyc files
 
 # Change to backend directory
 cd "$DIR"
@@ -205,12 +233,14 @@ if [ ! -d "$DIR/app" ]; then
     echo "⚠️  WARNING: app directory not found"
 fi
 
-# Start the server
+# Start the server using the venv's python3 explicitly
+echo ""
 echo "========================================="
 echo "🎯 Starting FastAPI server..."
 echo "========================================="
 
-python3 main.py 2>&1
+# Use the venv's python3 explicitly to avoid any path issues
+"$DIR/python-env/bin/python3" main.py 2>&1
 
 EXIT_CODE=$?
 
@@ -248,6 +278,7 @@ echo "📦 Location: build/backend/"
 echo "💾 Size: $BACKEND_SIZE"
 echo "🏗️  Architecture: $(uname -m)"
 echo "✅ Cleaned for macOS code signing"
+echo "✅ Python isolation fix applied"
 echo "========================================="
 echo ""
 echo "🧪 To test the backend:"

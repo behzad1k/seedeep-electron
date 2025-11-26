@@ -1,8 +1,6 @@
 #!/bin/bash
 
 echo "🔨 Building Python backend with bundled environment..."
-echo "📍 Architecture: $(uname -m)"
-echo "📍 OS: $(uname -s)"
 
 # Detect Python
 if command -v python3.9 &> /dev/null; then
@@ -16,15 +14,6 @@ fi
 
 echo "📍 Using Python: $PYTHON_CMD"
 $PYTHON_CMD --version
-
-# Check Python architecture (important for M1/M2)
-PYTHON_ARCH=$($PYTHON_CMD -c "import platform; print(platform.machine())")
-echo "📍 Python architecture: $PYTHON_ARCH"
-
-if [[ "$(uname -m)" == "arm64" ]] && [[ "$PYTHON_ARCH" != "arm64" ]]; then
-    echo "⚠️  WARNING: Running on ARM64 (M1/M2) but Python is $PYTHON_ARCH"
-    echo "⚠️  This may cause compatibility issues. Consider installing native ARM64 Python."
-fi
 
 # Clean previous build
 echo "🧹 Cleaning previous build..."
@@ -120,11 +109,9 @@ done
 # Remove signature from python binary to avoid signing conflicts
 if [ -f "python3" ]; then
     codesign --remove-signature python3 2>/dev/null || true
-    echo "✅ Removed signature from python3"
 fi
 if [ -f "python" ]; then
     codesign --remove-signature python 2>/dev/null || true
-    echo "✅ Removed signature from python"
 fi
 
 cd ../../../..
@@ -137,100 +124,41 @@ find build/backend/python-env/lib -name "__pycache__" -type d -exec rm -rf {} + 
 find build/backend/python-env/lib -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
 find build/backend/python-env/lib -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Create startup script for macOS with better error handling
+# Create startup script for macOS
 echo "📝 Creating startup script..."
 cat > build/backend/start-backend << 'SCRIPT_EOF'
 #!/bin/bash
 
-# Enable error reporting
-set -e
-
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-echo "========================================="
-echo "🚀 Starting SeeDeep Backend"
-echo "========================================="
+echo "🚀 Starting SeeDeep Backend..."
 echo "📂 Working directory: $DIR"
-echo "📍 Architecture: $(uname -m)"
-echo "📍 Shell: $SHELL"
-echo "========================================="
-
-# Check for virtual environment
-if [ ! -d "$DIR/python-env" ]; then
-    echo "❌ ERROR: python-env directory not found at $DIR/python-env"
-    exit 1
-fi
-
-# Check for activate script
-if [ ! -f "$DIR/python-env/bin/activate" ]; then
-    echo "❌ ERROR: activate script not found"
-    exit 1
-fi
 
 # Activate virtual environment
-echo "🔧 Activating virtual environment..."
-source "$DIR/python-env/bin/activate"
-
-if [ $? -ne 0 ]; then
-    echo "❌ ERROR: Failed to activate virtual environment"
+if [ -f "$DIR/python-env/bin/activate" ]; then
+    source "$DIR/python-env/bin/activate"
+    echo "✅ Virtual environment activated"
+else
+    echo "❌ Virtual environment not found"
     exit 1
 fi
 
-echo "✅ Virtual environment activated"
-
-# Check Python
-which python3
-python3 --version
-echo "🐍 Python architecture: $(python3 -c 'import platform; print(platform.machine())')"
-
-# Change to backend directory
 cd "$DIR"
 
-if [ $? -ne 0 ]; then
-    echo "❌ ERROR: Failed to change to directory $DIR"
-    exit 1
-fi
-
-# Check for main.py
 if [ ! -f "$DIR/main.py" ]; then
-    echo "❌ ERROR: main.py not found at $DIR/main.py"
-    ls -la "$DIR"
+    echo "❌ main.py not found"
     exit 1
 fi
 
-echo "✅ Found main.py"
-
-# Check for required directories
-if [ ! -d "$DIR/app" ]; then
-    echo "⚠️  WARNING: app directory not found"
-fi
-
-# Start the server
-echo "========================================="
 echo "🎯 Starting FastAPI server..."
-echo "========================================="
-
-python3 main.py 2>&1
+python3 main.py
 
 EXIT_CODE=$?
-
-echo "========================================="
 echo "⚠️ Backend exited with code: $EXIT_CODE"
-echo "========================================="
-
 exit $EXIT_CODE
 SCRIPT_EOF
 
 chmod +x build/backend/start-backend
-echo "✅ Made start-backend executable"
-
-# Verify the script was created correctly
-if [ ! -f "build/backend/start-backend" ]; then
-    echo "❌ ERROR: Failed to create start-backend script"
-    exit 1
-fi
-
-echo "✅ Verified start-backend exists"
 
 # Create logs directory
 mkdir -p build/backend/logs
@@ -241,16 +169,8 @@ deactivate
 BACKEND_SIZE=$(du -sh build/backend | cut -f1)
 
 echo ""
-echo "========================================="
 echo "✅ Backend bundled successfully!"
-echo "========================================="
 echo "📦 Location: build/backend/"
 echo "💾 Size: $BACKEND_SIZE"
-echo "🏗️  Architecture: $(uname -m)"
-echo "✅ Cleaned for macOS code signing"
-echo "========================================="
 echo ""
-echo "🧪 To test the backend:"
-echo "   cd build/backend"
-echo "   ./start-backend"
-echo "========================================="
+echo "✅ Cleaned for macOS code signing"

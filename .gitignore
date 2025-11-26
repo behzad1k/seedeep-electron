@@ -19,3 +19,8 @@ release
 # OS
 .DS_Store
 Thumbs.db
+
+# Backend Files
+
+app/models/weights/*
+logs/app.log
