@@ -1,8 +1,8 @@
-// src/features/camera-management/components/AddCamera.tsx - UPDATED VERSION
+// src/features/camera-management/components/AddCamera.tsx - UPDATED WITH ALERTS
 // Changes:
-// 1. Moved Class Selection to last step (step 4)
-// 2. Added webcam support
-// 3. Added manufacturer-specific RTSP/HTTP generators (Hikvision, Dahua, Axis, etc.)
+// 1. Added alert_email input
+// 2. Added alert configuration section
+// 3. Include alert config in request body
 
 import React, { useState, useRef } from "react";
 import {
@@ -44,6 +44,8 @@ import {
   Laptop,
   Info,
   CheckCircle,
+  Notifications,
+  Email,
 } from "@mui/icons-material";
 import { useTheme } from "@/contexts/ThemeContext";
 import { ClassModelMapper } from "@utils/models/classModelMapper";
@@ -198,6 +200,12 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
     name: "",
     description: "",
     location: "",
+
+    // NEW: Alert configuration
+    alert_email: "",
+    email_enabled: true,
+    cooldown_seconds: 60,
+
     sourceType: "ip_camera" as "ip_camera" | "webcam",
     manufacturer: "onvif" as keyof typeof CAMERA_MANUFACTURERS,
     streamType: "main" as "main" | "sub" | "custom",
@@ -253,21 +261,18 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
   const previewRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // NEW: Updated steps - Class Selection moved to last
   const steps = [
     "Basic Information",
     "Camera Source",
     "Connection Test & Settings",
     "Class Selection & Features",
   ];
-
   const handleInputChange = (field: string) => (event: any) => {
     const value =
       event.target.type === "checkbox"
         ? event.target.checked
         : event.target.value;
 
-    // Auto-populate manufacturer defaults when manufacturer changes
     if (field === "manufacturer") {
       const manufacturer =
         CAMERA_MANUFACTURERS[value as keyof typeof CAMERA_MANUFACTURERS];
@@ -279,13 +284,10 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         password: manufacturer.defaultPassword,
         protocol: manufacturer.protocols[0] as any,
       }));
-    }
-    // Auto-update port when protocol changes
-    else if (field === "protocol") {
+    } else if (field === "protocol") {
       const manufacturer = CAMERA_MANUFACTURERS[formData.manufacturer];
       let newPort = formData.port;
 
-      // Set default ports based on protocol
       if (value === "rtsp") newPort = "554";
       else if (value === "http" || value === "https") newPort = "80";
       else if (value === "rtmp") newPort = "1935";
@@ -297,21 +299,18 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
     }
   };
 
-  // ONVIF Discovery function
   const discoverOnvifDevices = async () => {
     setOnvifDiscovering(true);
     setDiscoveredDevices([]);
 
     try {
-      // Call backend ONVIF discovery endpoint with current IP/credentials
       const response = await fetch(
-        "http://localhost:8000/api/v1/ptz/discover",
+        "http://localhost:8000/api/v1/onvif/discover",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             ip: formData.ipAddress,
-            port: parseInt(formData.port),
             username: formData.username,
             password: formData.password,
           }),
@@ -322,7 +321,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         const data = await response.json();
 
         if (data.success && data.device) {
-          // Build device info from ONVIF response
           const device = {
             ip: formData.ipAddress,
             port: formData.port,
@@ -338,7 +336,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
 
           setDiscoveredDevices([device]);
 
-          // Auto-fill with discovered info
           setFormData((prev) => ({
             ...prev,
             name: prev.name || device.name,
@@ -370,7 +367,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
   };
 
   const selectDiscoveredDevice = (device: any) => {
-    // Auto-populate form with discovered device info
     setFormData((prev) => ({
       ...prev,
       ipAddress: device.ip,
@@ -380,9 +376,7 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
       protocol: "onvif",
     }));
 
-    // If device has streams, we can optionally set the stream URL
     if (device.streams && device.streams.length > 0) {
-      // Use the first (usually main) stream
       const mainStream = device.streams[0];
       setFormData((prev) => ({
         ...prev,
@@ -402,7 +396,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
     const manufacturer = CAMERA_MANUFACTURERS[formData.manufacturer];
     let template = "";
 
-    // Build template key based on protocol and stream type
     if (formData.protocol === "onvif") {
       template =
         manufacturer.urlTemplates.onvif ||
@@ -412,7 +405,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         manufacturer.urlTemplates[formData.protocol] ||
         manufacturer.urlTemplates.rtsp;
     } else {
-      // For manufacturer-specific URLs, combine protocol and stream type
       const templateKey = `${formData.protocol}_${formData.streamType}`;
       template =
         manufacturer.urlTemplates[templateKey] ||
@@ -421,7 +413,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         Object.values(manufacturer.urlTemplates)[0];
     }
 
-    // Replace placeholders
     let url = template
       .replace("{username}", formData.username)
       .replace("{password}", formData.password)
@@ -474,10 +465,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                     });
 
                     setConnectionStatus("success");
-                    console.log("✅ Webcam connected:", {
-                      width: videoRef.current.videoWidth,
-                      height: videoRef.current.videoHeight,
-                    });
                   }
                 } else {
                   setConnectionStatus("error");
@@ -552,7 +539,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
   ) => {
     if (!calibrationMode || !previewRef.current) return;
 
-    // Limit points based on calibration mode
     const maxPoints =
       formData.calibrationMode === "reference_object"
         ? 2
@@ -638,7 +624,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
       if (formData.sourceType === "webcam") {
         finalStreamUrl = "webcam://0";
       } else {
-        // Build RTSP URL (backend will also store components separately)
         finalStreamUrl =
           formData.streamUrl ||
           `${formData.protocol}://${formData.username && formData.password ? `${formData.username}:${formData.password}@` : ""}${formData.ipAddress}:${formData.port}/stream`;
@@ -646,7 +631,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
 
       let calibrationData = undefined;
 
-      // Reference Object Method
       if (
         formData.calibrationMode === "reference_object" &&
         formData.calibrationPoints.length === 2 &&
@@ -661,10 +645,7 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
           ],
           reference_width_meters: refDist,
         };
-      }
-
-      // Perspective Transform Method
-      else if (
+      } else if (
         formData.calibrationMode === "perspective" &&
         formData.calibrationPoints.length === 4 &&
         formData.perspectiveWidth &&
@@ -683,10 +664,7 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
           rectangle_width_meters: width,
           rectangle_height_meters: height,
         };
-      }
-
-      // Vanishing Point Method
-      else if (
+      } else if (
         formData.calibrationMode === "vanishing_point" &&
         formData.calibrationPoints.length === 6 &&
         formData.referenceHeight
@@ -706,13 +684,14 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         };
       }
 
-      // NEW: Send connection fields separately
       const cameraData = {
         name: formData.name,
         location: formData.location,
         rtsp_url: finalStreamUrl,
 
-        // NEW: Connection fields
+        // NEW: Alert configuration
+        alert_email: formData.alert_email || null,
+
         ip_address:
           formData.sourceType === "ip_camera" ? formData.ipAddress : null,
         username:
@@ -720,12 +699,10 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         password:
           formData.sourceType === "ip_camera" ? formData.password : null,
 
-        // NEW: Ports
         rtsp_port: formData.protocol === "rtsp" ? parseInt(formData.port) : 554,
-        onvif_port: 80, // Default ONVIF port
+        onvif_port: 80,
         http_port: formData.protocol === "http" ? parseInt(formData.port) : 80,
 
-        // NEW: Stream details
         channel: formData.channel || "1",
         subtype: formData.streamType === "main" ? "0" : "1",
         stream_path:
@@ -736,7 +713,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             : null),
         manufacturer: formData.manufacturer,
 
-        // Existing fields
         width,
         height,
         fps: formData.fps,
@@ -830,6 +806,55 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
           rows={3}
         />
       </Grid>
+
+      {/* NEW: Alert Email Configuration */}
+      <Grid item xs={12}>
+        <Divider sx={{ my: 2 }}>
+          <Chip icon={<Notifications />} label="Alert Configuration" />
+        </Divider>
+      </Grid>
+
+      <Grid item xs={12}>
+        <Alert severity="info" icon={<Email />} sx={{ mb: 2 }}>
+          Configure email alerts for this camera. You can set specific alert
+          thresholds later.
+        </Alert>
+      </Grid>
+
+      <Grid item xs={12} md={8}>
+        <TextField
+          fullWidth
+          label="Alert Email Address"
+          type="email"
+          value={formData.alert_email}
+          onChange={handleInputChange("alert_email")}
+          placeholder="alerts@company.com"
+          helperText="Email address to receive alerts from this camera"
+        />
+      </Grid>
+
+      <Grid item xs={12} md={4}>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={formData.email_enabled}
+              onChange={handleInputChange("email_enabled")}
+            />
+          }
+          label="Email Alerts Enabled"
+        />
+      </Grid>
+
+      <Grid item xs={12} md={6}>
+        <TextField
+          fullWidth
+          label="Alert Cooldown (seconds)"
+          type="number"
+          value={formData.cooldown_seconds}
+          onChange={handleInputChange("cooldown_seconds")}
+          helperText="Minimum time between alerts of the same type"
+        />
+      </Grid>
     </Grid>
   );
 
@@ -841,7 +866,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         </Typography>
       </Grid>
 
-      {/* Source Type Selection */}
       <Grid item xs={12}>
         <FormControl component="fieldset">
           <Typography variant="subtitle2" gutterBottom>
@@ -896,7 +920,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
 
       {formData.sourceType === "ip_camera" ? (
         <>
-          {/* ONVIF Discovery Section */}
           <Grid item xs={12}>
             <Alert severity="info" icon={<Info />}>
               <Box
@@ -941,7 +964,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             </Alert>
           </Grid>
 
-          {/* Connection Error */}
           {connectionError && !onvifDiscovering && (
             <Grid item xs={12}>
               <Alert severity="error" onClose={() => setConnectionError("")}>
@@ -950,7 +972,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             </Grid>
           )}
 
-          {/* Discovered Device Details */}
           {discoveredDevices.length > 0 && (
             <Grid item xs={12}>
               <Paper
@@ -977,7 +998,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                       </Typography>
                     </Box>
 
-                    {/* Device Information */}
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="subtitle2" gutterBottom>
                         Device Information
@@ -1028,7 +1048,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                       </Box>
                     </Box>
 
-                    {/* Capabilities */}
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="subtitle2" gutterBottom>
                         Capabilities
@@ -1062,7 +1081,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                       </Box>
                     </Box>
 
-                    {/* Available Streams */}
                     {device.streams && device.streams.length > 0 && (
                       <Box>
                         <Typography variant="subtitle2" gutterBottom>
@@ -1175,7 +1193,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             </Divider>
           </Grid>
 
-          {/* Manufacturer Selection */}
           <Grid item xs={12} md={6}>
             <FormControl fullWidth>
               <InputLabel>Camera Manufacturer</InputLabel>
@@ -1194,7 +1211,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             </FormControl>
           </Grid>
 
-          {/* Protocol Selection - NEW PROMINENT DROPDOWN */}
           <Grid item xs={12} md={6}>
             <FormControl fullWidth>
               <InputLabel>Protocol</InputLabel>
@@ -1229,7 +1245,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             </FormControl>
           </Grid>
 
-          {/* Manufacturer Notes */}
           {CAMERA_MANUFACTURERS[formData.manufacturer].notes && (
             <Grid item xs={12}>
               <Alert severity="info" sx={{ fontSize: "0.875rem" }}>
@@ -1238,7 +1253,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             </Grid>
           )}
 
-          {/* Stream Type (if not ONVIF or custom) */}
           {formData.protocol !== "onvif" &&
             formData.manufacturer !== "custom" && (
               <Grid item xs={12} md={6}>
@@ -1256,7 +1270,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
               </Grid>
             )}
 
-          {/* IP Address and Port */}
           <Grid item xs={12} md={8}>
             <TextField
               fullWidth
@@ -1289,7 +1302,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             />
           </Grid>
 
-          {/* Channel (for Dahua/Amcrest) */}
           {["dahua", "amcrest"].includes(formData.manufacturer) &&
             formData.protocol !== "onvif" && (
               <Grid item xs={12} md={6}>
@@ -1303,7 +1315,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
               </Grid>
             )}
 
-          {/* Custom Path (for custom manufacturer or custom protocol) */}
           {formData.manufacturer === "custom" &&
             formData.protocol !== "onvif" && (
               <Grid item xs={12}>
@@ -1318,7 +1329,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
               </Grid>
             )}
 
-          {/* Authentication */}
           <Grid item xs={12}>
             <FormControlLabel
               control={
@@ -1361,7 +1371,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
             </>
           )}
 
-          {/* Generated Stream URL */}
           <Grid item xs={12}>
             <Box display="flex" gap={1}>
               <TextField
@@ -1384,7 +1393,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
           </Grid>
         </>
       ) : (
-        /* Webcam Info */
         <Grid item xs={12}>
           <Alert severity="info" icon={<Laptop />}>
             <Typography variant="body2" fontWeight="bold" gutterBottom>
@@ -1409,7 +1417,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         </Typography>
       </Grid>
 
-      {/* Camera Settings */}
       <Grid item xs={12} md={4}>
         <FormControl fullWidth>
           <InputLabel>Resolution</InputLabel>
@@ -1469,7 +1476,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
         </Button>
       </Grid>
 
-      {/* Webcam Preview */}
       {formData.sourceType === "webcam" &&
         (connectionStatus === "testing" || connectionStatus === "success") && (
           <Grid item xs={12}>
@@ -1495,7 +1501,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
           </Grid>
         )}
 
-      {/* IP Camera Preview */}
       {connectionStatus === "success" &&
         previewFrame &&
         formData.sourceType !== "webcam" && (
@@ -1530,7 +1535,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                   const scaleX = rect.width / (selectedRes?.width || 1920);
                   const scaleY = rect.height / (selectedRes?.height || 1080);
 
-                  // Different colors and labels based on calibration mode
                   let color = "red";
                   let label = `${idx + 1}`;
 
@@ -1587,7 +1591,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                   );
                 })}
 
-                {/* Draw lines for visualization */}
                 {previewRef.current && (
                   <svg
                     style={{
@@ -1599,7 +1602,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                       pointerEvents: "none",
                     }}
                   >
-                    {/* Reference Object: Line between 2 points */}
                     {formData.calibrationMode === "reference_object" &&
                       formData.calibrationPoints.length === 2 &&
                       (() => {
@@ -1625,7 +1627,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                         );
                       })()}
 
-                    {/* Perspective: Rectangle */}
                     {formData.calibrationMode === "perspective" &&
                       formData.calibrationPoints.length === 4 &&
                       (() => {
@@ -1654,7 +1655,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                         );
                       })()}
 
-                    {/* Vanishing Point: Lines */}
                     {formData.calibrationMode === "vanishing_point" &&
                       (() => {
                         const rect =
@@ -1668,7 +1668,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                           rect.height / (selectedRes?.height || 1080);
                         return (
                           <>
-                            {/* Line 1 */}
                             {formData.calibrationPoints.length >= 2 && (
                               <line
                                 x1={
@@ -1687,7 +1686,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                                 strokeWidth="3"
                               />
                             )}
-                            {/* Line 2 */}
                             {formData.calibrationPoints.length >= 4 && (
                               <line
                                 x1={
@@ -1706,7 +1704,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                                 strokeWidth="3"
                               />
                             )}
-                            {/* Height reference */}
                             {formData.calibrationPoints.length === 6 && (
                               <line
                                 x1={
@@ -1733,7 +1730,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                 )}
               </Box>
 
-              {/* Calibration Controls */}
               <Box sx={{ mt: 2 }}>
                 <Button
                   variant={calibrationMode ? "contained" : "outlined"}
@@ -1756,7 +1752,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
 
                 {calibrationMode && (
                   <Box sx={{ mt: 2 }}>
-                    {/* Calibration Method Selection */}
                     <FormControl component="fieldset" sx={{ mb: 2 }}>
                       <FormLabel component="legend">
                         Calibration Method
@@ -1820,7 +1815,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                       </RadioGroup>
                     </FormControl>
 
-                    {/* Method-specific instructions */}
                     {formData.calibrationMode === "reference_object" && (
                       <Alert
                         severity="info"
@@ -1852,7 +1846,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
                       </Alert>
                     )}
 
-                    {/* Input fields based on calibration method */}
                     {formData.calibrationMode === "reference_object" && (
                       <>
                         <TextField
@@ -1939,7 +1932,6 @@ const AddCamera: React.FC<AddCameraProps> = ({ onClose, onSubmit }) => {
           </Grid>
         )}
 
-      {/* Connection Error */}
       {connectionStatus === "error" && (
         <Grid item xs={12}>
           <Alert severity="error">{connectionError}</Alert>

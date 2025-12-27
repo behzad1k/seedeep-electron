@@ -4,311 +4,390 @@
  */
 
 interface WSConnection {
-  ws: WebSocket;
-  url: string;
-  subscribers: Map<string, {
-    onMessage: (data: any) => void;
-    onError: (error: any) => void;
-  }>;
-  reconnectAttempts: number;
-  reconnectTimer: any | null;
-  isConnecting: boolean;
+	ws: WebSocket;
+	url: string;
+	subscribers: Map<
+		string,
+		{
+			onMessage: (data: any) => void;
+			onError: (error: any) => void;
+		}
+	>;
+	reconnectAttempts: number;
+	reconnectTimer: any | null;
+	isConnecting: boolean;
 }
 
 export class WebSocketPool {
-  private static instance: WebSocketPool;
-  private connections: Map<string, WSConnection> = new Map();
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 3000;
+	private static instance: WebSocketPool;
+	private connections: Map<string, WSConnection> = new Map();
+	private maxReconnectAttempts = 5;
+	private reconnectDelay = 3000;
+	private maxConnections = 10;
+	private connectionTimeouts: Map<string, any> = new Map();
+	private lastActivityTime: Map<string, number> = new Map();
+	private inactivityTimeout = 60000; // 60 seconds
 
-  private constructor() {}
+	// Add cleanup for inactive connections
+	private cleanupInactiveConnections(): void {
+		const now = Date.now();
 
-  static getInstance(): WebSocketPool {
-    if (!WebSocketPool.instance) {
-      WebSocketPool.instance = new WebSocketPool();
-    }
-    return WebSocketPool.instance;
-  }
+		this.connections.forEach((connection, url) => {
+			const lastActivity = this.lastActivityTime.get(url) || now;
 
-  /**
-   * Subscribe to a WebSocket connection
-   */
-  subscribe(
-    url: string,
-    subscriberId: string,
-    onMessage: (data: any) => void,
-    onError: (error: any) => void
-  ): () => void {
-    console.log(`[WebSocketPool] Subscribe request - URL: ${url}, Subscriber: ${subscriberId}`);
+			// Close connections with no subscribers that have been inactive
+			if (
+				connection.subscribers.size === 0 &&
+				now - lastActivity > this.inactivityTimeout
+			) {
+				console.log(`[WebSocketPool] Cleaning up inactive connection: ${url}`);
+				this.closeConnection(url);
+			}
+		});
+	}
 
-    let connection = this.connections.get(url);
+	constructor() {
+		setInterval(() => this.cleanupInactiveConnections(), 30000); // Every 30 seconds
+	}
+	static getInstance(): WebSocketPool {
+		if (!WebSocketPool.instance) {
+			WebSocketPool.instance = new WebSocketPool();
+		}
+		return WebSocketPool.instance;
+	}
 
-    // If connection exists and has this subscriber, return existing unsubscribe
-    if (connection && connection.subscribers.has(subscriberId)) {
-      console.log(`[WebSocketPool] Subscriber ${subscriberId} already exists for ${url}`);
-      return () => this.unsubscribe(url, subscriberId);
-    }
+	/**
+	 * Subscribe to a WebSocket connection
+	 */
+	subscribe(
+		url: string,
+		subscriberId: string,
+		onMessage: (data: any) => void,
+		onError: (error: any) => void,
+	): () => void {
+		console.log(
+			`[WebSocketPool] Subscribe request - URL: ${url}, Subscriber: ${subscriberId}`,
+		);
 
-    // Create new connection if it doesn't exist
-    if (!connection) {
-      console.log(`[WebSocketPool] Creating new connection for ${url}`);
-      connection = this.createConnection(url);
-      this.connections.set(url, connection);
-    }
+		let connection = this.connections.get(url);
 
-    // Add subscriber
-    connection.subscribers.set(subscriberId, { onMessage, onError });
-    console.log(`[WebSocketPool] Added subscriber ${subscriberId}. Total subscribers: ${connection.subscribers.size}`);
+		// If connection exists and has this subscriber, return existing unsubscribe
+		if (connection && connection.subscribers.has(subscriberId)) {
+			console.log(
+				`[WebSocketPool] Subscriber ${subscriberId} already exists for ${url}`,
+			);
+			return () => this.unsubscribe(url, subscriberId);
+		}
 
-    // Return unsubscribe function
-    return () => this.unsubscribe(url, subscriberId);
-  }
+		// Create new connection if it doesn't exist
+		if (!connection) {
+			console.log(`[WebSocketPool] Creating new connection for ${url}`);
+			connection = this.createConnection(url);
+			this.connections.set(url, connection);
+		}
 
-  /**
-   * Unsubscribe from a WebSocket connection
-   */
-  private unsubscribe(url: string, subscriberId: string): void {
-    console.log(`[WebSocketPool] Unsubscribe - URL: ${url}, Subscriber: ${subscriberId}`);
+		// Add subscriber
+		connection.subscribers.set(subscriberId, { onMessage, onError });
+		console.log(
+			`[WebSocketPool] Added subscriber ${subscriberId}. Total subscribers: ${connection.subscribers.size}`,
+		);
 
-    const connection = this.connections.get(url);
-    if (!connection) {
-      console.log(`[WebSocketPool] No connection found for ${url}`);
-      return;
-    }
+		// Return unsubscribe function
+		return () => this.unsubscribe(url, subscriberId);
+	}
 
-    connection.subscribers.delete(subscriberId);
-    console.log(`[WebSocketPool] Removed subscriber ${subscriberId}. Remaining: ${connection.subscribers.size}`);
+	/**
+	 * Unsubscribe from a WebSocket connection
+	 */
+	private unsubscribe(url: string, subscriberId: string): void {
+		console.log(
+			`[WebSocketPool] Unsubscribe - URL: ${url}, Subscriber: ${subscriberId}`,
+		);
 
-    // Close connection if no more subscribers
-    if (connection.subscribers.size === 0) {
-      console.log(`[WebSocketPool] No more subscribers, closing connection for ${url}`);
-      this.closeConnection(url);
-    }
-  }
+		const connection = this.connections.get(url);
+		if (!connection) {
+			console.log(`[WebSocketPool] No connection found for ${url}`);
+			return;
+		}
 
-  /**
-   * Create a new WebSocket connection
-   */
-  private createConnection(url: string): WSConnection {
-    const ws = new WebSocket(url);
+		connection.subscribers.delete(subscriberId);
+		console.log(
+			`[WebSocketPool] Removed subscriber ${subscriberId}. Remaining: ${connection.subscribers.size}`,
+		);
 
-    const connection: WSConnection = {
-      ws,
-      url,
-      subscribers: new Map(),
-      reconnectAttempts: 0,
-      reconnectTimer: null,
-      isConnecting: true
-    };
+		// Close connection if no more subscribers
+		if (connection.subscribers.size === 0) {
+			console.log(
+				`[WebSocketPool] No more subscribers, closing connection for ${url}`,
+			);
+			this.closeConnection(url);
+		}
+	}
 
-    ws.onopen = () => {
-      console.log(`[WebSocketPool] Connected to ${url}`);
-      connection.isConnecting = false;
-      connection.reconnectAttempts = 0;
-    };
+	/**
+	 * Create a new WebSocket connection
+	 */
+	private createConnection(url: string): WSConnection {
+		const ws = new WebSocket(url);
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+		const connection: WSConnection = {
+			ws,
+			url,
+			subscribers: new Map(),
+			reconnectAttempts: 0,
+			reconnectTimer: null,
+			isConnecting: true,
+		};
 
-        // Broadcast to all subscribers
-        connection.subscribers.forEach((subscriber, id) => {
-          try {
-            subscriber.onMessage(data);
-          } catch (error) {
-            console.error(`[WebSocketPool] Error in subscriber ${id} message handler:`, error);
-          }
-        });
-      } catch (error) {
-        console.error('[WebSocketPool] Error parsing message:', error);
-      }
-    };
+		ws.onopen = () => {
+			console.log(`[WebSocketPool] Connected to ${url}`);
+			connection.isConnecting = false;
+			connection.reconnectAttempts = 0;
+		};
 
-    ws.onerror = (error) => {
-      console.error(`[WebSocketPool] WebSocket error for ${url}:`, error);
-      connection.subscribers.forEach((subscriber) => {
-        subscriber.onError(error);
-      });
-    };
+		ws.onmessage = (event) => {
+			this.lastActivityTime.set(url, Date.now());
 
-    ws.onclose = (event) => {
-      console.log(`[WebSocketPool] Connection closed for ${url}. Code: ${event.code}, Reason: ${event.reason}`);
-      connection.isConnecting = false;
+			try {
+				const data = JSON.parse(event.data);
 
-      // Only attempt reconnection if there are still subscribers
-      if (connection.subscribers.size > 0 && connection.reconnectAttempts < this.maxReconnectAttempts) {
-        console.log(`[WebSocketPool] Attempting to reconnect... (${connection.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
-        this.reconnect(url, connection);
-      } else if (connection.reconnectAttempts >= this.maxReconnectAttempts) {
-        console.error(`[WebSocketPool] Max reconnection attempts reached for ${url}`);
-        this.connections.delete(url);
-      }
-    };
+				connection.subscribers.forEach((subscriber) => {
+					try {
+						subscriber.onMessage(data);
+					} catch (error) {
+						console.error(
+							`[WebSocketPool] Error in subscriber message handler:`,
+							error,
+						);
+					}
+				});
+			} catch (error) {
+				console.error("[WebSocketPool] Error parsing message:", error);
+			}
+		};
 
-    return connection;
-  }
+		ws.onerror = (error) => {
+			console.error(`[WebSocketPool] WebSocket error for ${url}:`, error);
+			connection.subscribers.forEach((subscriber) => {
+				subscriber.onError(error);
+			});
+		};
 
-  /**
-   * Reconnect to a WebSocket
-   */
-  private reconnect(url: string, connection: WSConnection): void {
-    if (connection.reconnectTimer) {
-      clearTimeout(connection.reconnectTimer);
-    }
+		ws.onclose = (event) => {
+			console.log(
+				`[WebSocketPool] Connection closed for ${url}. Code: ${event.code}, Reason: ${event.reason}`,
+			);
+			connection.isConnecting = false;
 
-    connection.reconnectAttempts++;
+			// Only attempt reconnection if there are still subscribers
+			if (
+				connection.subscribers.size > 0 &&
+				connection.reconnectAttempts < this.maxReconnectAttempts
+			) {
+				console.log(
+					`[WebSocketPool] Attempting to reconnect... (${connection.reconnectAttempts + 1}/${this.maxReconnectAttempts})`,
+				);
+				this.reconnect(url, connection);
+			} else if (connection.reconnectAttempts >= this.maxReconnectAttempts) {
+				console.error(
+					`[WebSocketPool] Max reconnection attempts reached for ${url}`,
+				);
+				this.connections.delete(url);
+			}
+		};
 
-    connection.reconnectTimer = setTimeout(() => {
-      if (connection.subscribers.size === 0) {
-        console.log(`[WebSocketPool] Aborting reconnect - no subscribers for ${url}`);
-        this.connections.delete(url);
-        return;
-      }
+		return connection;
+	}
 
-      console.log(`[WebSocketPool] Reconnecting to ${url}...`);
+	/**
+	 * Reconnect to a WebSocket
+	 */
+	private reconnect(url: string, connection: WSConnection): void {
+		if (connection.reconnectTimer) {
+			clearTimeout(connection.reconnectTimer);
+		}
 
-      const newConnection = this.createConnection(url);
-      newConnection.subscribers = connection.subscribers;
-      newConnection.reconnectAttempts = connection.reconnectAttempts;
+		connection.reconnectAttempts++;
 
-      this.connections.set(url, newConnection);
-    }, this.reconnectDelay);
-  }
+		connection.reconnectTimer = setTimeout(() => {
+			if (connection.subscribers.size === 0) {
+				console.log(
+					`[WebSocketPool] Aborting reconnect - no subscribers for ${url}`,
+				);
+				this.connections.delete(url);
+				return;
+			}
 
-  /**
-   * Close a WebSocket connection
-   */
-  private closeConnection(url: string): void {
-    const connection = this.connections.get(url);
-    if (!connection) return;
+			console.log(`[WebSocketPool] Reconnecting to ${url}...`);
 
-    if (connection.reconnectTimer) {
-      clearTimeout(connection.reconnectTimer);
-    }
+			const newConnection = this.createConnection(url);
+			newConnection.subscribers = connection.subscribers;
+			newConnection.reconnectAttempts = connection.reconnectAttempts;
 
-    if (connection.ws.readyState === WebSocket.OPEN || connection.ws.readyState === WebSocket.CONNECTING) {
-      connection.ws.close();
-    }
+			this.connections.set(url, newConnection);
+		}, this.reconnectDelay);
+	}
 
-    this.connections.delete(url);
-    console.log(`[WebSocketPool] Closed and removed connection for ${url}`);
-  }
+	private checkMemoryPressure(): boolean {
+		if ("memory" in performance) {
+			const memory = (performance as any).memory;
+			const usedMemory = memory.usedJSHeapSize / memory.jsHeapSizeLimit;
 
-  /**
-   * Send raw binary data directly through the WebSocket
-   * This is for webcam frame sending
-   */
-  sendRawBinary(url: string, data: ArrayBuffer): void {
-    const connection = this.connections.get(url);
-    if (!connection || connection.ws.readyState !== WebSocket.OPEN) {
-      console.warn(`[WebSocketPool] Cannot send data - connection not ready for ${url}`);
-      return;
-    }
+			if (usedMemory > 0.9) {
+				console.warn(
+					"[WebSocketPool] High memory usage detected, limiting connections",
+				);
+				return true;
+			}
+		}
+		return false;
+	}
+	/**
+	 * Close a WebSocket connection
+	 */
+	private closeConnection(url: string): void {
+		const connection = this.connections.get(url);
+		if (!connection) return;
 
-    try {
-      connection.ws.send(data);
-    } catch (error) {
-      console.error(`[WebSocketPool] Error sending raw binary:`, error);
-    }
-  }
+		if (connection.reconnectTimer) {
+			clearTimeout(connection.reconnectTimer);
+		}
 
-  /**
-   * Send binary frame data (legacy method - kept for compatibility)
-   */
-  sendBinaryFrame(url: string, data: {
-    cameraId: string;
-    timestamp: number;
-    imageData: ArrayBuffer;
-  }): void {
-    const connection = this.connections.get(url);
-    if (!connection || connection.ws.readyState !== WebSocket.OPEN) {
-      console.warn(`[WebSocketPool] Cannot send data - connection not ready for ${url}`);
-      return;
-    }
+		if (
+			connection.ws.readyState === WebSocket.OPEN ||
+			connection.ws.readyState === WebSocket.CONNECTING
+		) {
+			connection.ws.close();
+		}
 
-    try {
-      const cameraIdBytes = new TextEncoder().encode(data.cameraId);
-      const headerSize = 1 + cameraIdBytes.length + 4;
-      const totalSize = headerSize + data.imageData.byteLength;
+		this.connections.delete(url);
+		console.log(`[WebSocketPool] Closed and removed connection for ${url}`);
+	}
 
-      const buffer = new ArrayBuffer(totalSize);
-      const view = new DataView(buffer);
-      const uint8View = new Uint8Array(buffer);
+	/**
+	 * Send raw binary data directly through the WebSocket
+	 * This is for webcam frame sending
+	 */
+	sendRawBinary(url: string, data: ArrayBuffer): void {
+		const connection = this.connections.get(url);
+		if (!connection || connection.ws.readyState !== WebSocket.OPEN) {
+			console.warn(
+				`[WebSocketPool] Cannot send data - connection not ready for ${url}`,
+			);
+			return;
+		}
 
-      let offset = 0;
+		try {
+			connection.ws.send(data);
+		} catch (error) {
+			console.error(`[WebSocketPool] Error sending raw binary:`, error);
+		}
+	}
 
-      // Camera ID length
-      view.setUint8(offset, cameraIdBytes.length);
-      offset += 1;
+	/**
+	 * Send binary frame data (legacy method - kept for compatibility)
+	 */
+	sendBinaryFrame(
+		url: string,
+		data: {
+			cameraId: string;
+			timestamp: number;
+			imageData: ArrayBuffer;
+		},
+	): void {
+		const connection = this.connections.get(url);
+		if (!connection || connection.ws.readyState !== WebSocket.OPEN) {
+			console.warn(
+				`[WebSocketPool] Cannot send data - connection not ready for ${url}`,
+			);
+			return;
+		}
 
-      // Camera ID
-      uint8View.set(cameraIdBytes, offset);
-      offset += cameraIdBytes.length;
+		try {
+			const cameraIdBytes = new TextEncoder().encode(data.cameraId);
+			const headerSize = 1 + cameraIdBytes.length + 4;
+			const totalSize = headerSize + data.imageData.byteLength;
 
-      // Timestamp
-      view.setUint32(offset, data.timestamp, true);
-      offset += 4;
+			const buffer = new ArrayBuffer(totalSize);
+			const view = new DataView(buffer);
+			const uint8View = new Uint8Array(buffer);
 
-      // Image data
-      uint8View.set(new Uint8Array(data.imageData), offset);
+			let offset = 0;
 
-      connection.ws.send(buffer);
-    } catch (error) {
-      console.error(`[WebSocketPool] Error sending binary frame:`, error);
-    }
-  }
+			// Camera ID length
+			view.setUint8(offset, cameraIdBytes.length);
+			offset += 1;
 
-  /**
-   * Get connection status
-   */
-  getConnectionStatus(url: string): {
-    isConnected: boolean;
-    subscriberCount: number;
-    reconnectAttempts: number;
-  } | null {
-    const connection = this.connections.get(url);
-    if (!connection) return null;
+			// Camera ID
+			uint8View.set(cameraIdBytes, offset);
+			offset += cameraIdBytes.length;
 
-    return {
-      isConnected: connection.ws.readyState === WebSocket.OPEN,
-      subscriberCount: connection.subscribers.size,
-      reconnectAttempts: connection.reconnectAttempts
-    };
-  }
+			// Timestamp
+			view.setUint32(offset, data.timestamp, true);
+			offset += 4;
 
-  /**
-   * Get the actual WebSocket for direct access (for webcam)
-   */
-  getWebSocket(url: string): WebSocket | null {
-    const connection = this.connections.get(url);
-    return connection?.ws || null;
-  }
+			// Image data
+			uint8View.set(new Uint8Array(data.imageData), offset);
 
-  /**
-   * Close all connections
-   */
-  closeAll(): void {
-    console.log('[WebSocketPool] Closing all connections');
-    this.connections.forEach((_, url) => {
-      this.closeConnection(url);
-    });
-    this.connections.clear();
-  }
+			connection.ws.send(buffer);
+		} catch (error) {
+			console.error(`[WebSocketPool] Error sending binary frame:`, error);
+		}
+	}
 
-  /**
-   * Get debug info
-   */
-  getDebugInfo(): string {
-    const info: string[] = [];
-    info.push(`Total connections: ${this.connections.size}`);
+	/**
+	 * Get connection status
+	 */
+	getConnectionStatus(url: string): {
+		isConnected: boolean;
+		subscriberCount: number;
+		reconnectAttempts: number;
+	} | null {
+		const connection = this.connections.get(url);
+		if (!connection) return null;
 
-    this.connections.forEach((conn, url) => {
-      info.push(`  ${url}:`);
-      info.push(`    - State: ${['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][conn.ws.readyState]}`);
-      info.push(`    - Subscribers: ${conn.subscribers.size}`);
-      info.push(`    - Reconnect attempts: ${conn.reconnectAttempts}`);
-    });
+		return {
+			isConnected: connection.ws.readyState === WebSocket.OPEN,
+			subscriberCount: connection.subscribers.size,
+			reconnectAttempts: connection.reconnectAttempts,
+		};
+	}
 
-    return info.join('\n');
-  }
+	/**
+	 * Get the actual WebSocket for direct access (for webcam)
+	 */
+	getWebSocket(url: string): WebSocket | null {
+		const connection = this.connections.get(url);
+		return connection?.ws || null;
+	}
+
+	/**
+	 * Close all connections
+	 */
+	closeAll(): void {
+		console.log("[WebSocketPool] Closing all connections");
+		this.connections.forEach((_, url) => {
+			this.closeConnection(url);
+		});
+		this.connections.clear();
+	}
+
+	/**
+	 * Get debug info
+	 */
+	getDebugInfo(): string {
+		const info: string[] = [];
+		info.push(`Total connections: ${this.connections.size}`);
+
+		this.connections.forEach((conn, url) => {
+			info.push(`  ${url}:`);
+			info.push(
+				`    - State: ${["CONNECTING", "OPEN", "CLOSING", "CLOSED"][conn.ws.readyState]}`,
+			);
+			info.push(`    - Subscribers: ${conn.subscribers.size}`);
+			info.push(`    - Reconnect attempts: ${conn.reconnectAttempts}`);
+		});
+
+		return info.join("\n");
+	}
 }

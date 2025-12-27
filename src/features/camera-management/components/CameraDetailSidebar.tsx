@@ -4,6 +4,7 @@
 // ============================================
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { WebSocketPool } from "@utils/websocket/WebsocketPool.ts";
 import {
   Drawer,
   Box,
@@ -34,6 +35,9 @@ import {
   CircularProgress,
   Card,
   CardContent,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import {
   Close,
@@ -60,6 +64,7 @@ import {
   Bookmark,
   BookmarkBorder,
   MyLocation,
+  Email,
 } from "@mui/icons-material";
 import { useTheme } from "@/contexts/ThemeContext";
 import { BackendCamera } from "@shared/types";
@@ -194,8 +199,10 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
   const [activeTab, setActiveTab] = useState(0);
   const [formData, setFormData] = useState<any>({});
   const [logs, setLogs] = useState<any[]>([]);
-  const [currentFrame, setCurrentFrame] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+
+  const [currentFrame, setCurrentFrame] = useState<any>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   // Calibration state
   const [calibrationMode, setCalibrationMode] = useState<
@@ -213,6 +220,24 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
   const [perspectiveHeight, setPerspectiveHeight] = useState("");
   const [testResult, setTestResult] = useState<any>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const [trackingAlerts, setTrackingAlerts] = useState<
+    Record<
+      string,
+      { enabled: boolean; threshold: number; condition: "over" | "under" }
+    >
+  >({});
+  const [speedAlerts, setSpeedAlerts] = useState<
+    Record<
+      string,
+      { enabled: boolean; threshold: number; condition: "over" | "under" }
+    >
+  >({});
+  const [distanceAlerts, setDistanceAlerts] = useState<
+    Record<
+      string,
+      { enabled: boolean; threshold: number; condition: "over" | "under" }
+    >
+  >({});
 
   // Device Control state
   const [currentVelocity, setCurrentVelocity] = useState({ pan: 0, tilt: 0 });
@@ -242,6 +267,7 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
 
   useEffect(() => {
     if (camera) {
+      console.log(camera);
       setFormData({
         name: camera.name,
         location: camera.location || "",
@@ -253,38 +279,72 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
         speed_classes: camera.features?.speed_classes || [],
         distance_classes: camera.features?.distance_classes || [],
         detection_classes: camera.features?.detection_classes || [],
+        alert_email: camera.alert_email,
       });
     }
   }, [camera]);
+
+  useEffect(() => {
+    if (!camera) return;
+
+    const loadAlertConfig = async () => {
+      try {
+        const response = await fetch(
+          `http://localhost:8000/api/v1/alerts/${camera.id}/config`,
+        );
+        const config = await response.json();
+
+        // Build alert state from config
+        const tracking = {};
+        config.tracking_alerts?.forEach((alert: any) => {
+          // @ts-ignore
+          tracking[alert.object_class] = {
+            enabled: alert.enabled,
+            threshold: alert.threshold_seconds,
+            condition: alert.condition,
+          };
+        });
+        setTrackingAlerts(tracking);
+
+        // Similar for speed and distance...
+      } catch (error) {
+        console.error("Error loading alert config:", error);
+      }
+    };
+
+    loadAlertConfig();
+  }, [camera?.id]);
 
   // Subscribe to WebSocket for logs
   useEffect(() => {
     if (!camera) return;
 
-    const ws = new WebSocket(`ws://localhost:8000/ws/camera/${camera.id}`);
+    const pool = WebSocketPool.getInstance();
+    const wsUrl = `ws://localhost:8000/ws/camera/${camera.id}`;
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        // Update current frame
+    unsubscribeRef.current = pool.subscribe(
+      wsUrl,
+      `sidebar-${camera.id}`,
+      (data) => {
         setCurrentFrame(data);
-
-        // Add to logs
         setLogs((prev) => [
           {
             timestamp: new Date(),
             data: data,
           },
-          ...prev.slice(0, 49), // Keep last 50 logs
+          ...prev.slice(0, 49),
         ]);
-      } catch (error) {
-        console.error("Error parsing WebSocket data:", error);
-      }
-    };
+      },
+      (err) => {
+        console.error("[CameraDetailSidebar] WebSocket error:", err);
+      },
+    );
 
     return () => {
-      ws.close();
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
     };
   }, [camera?.id]);
 
@@ -292,10 +352,14 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
     if (!camera) return;
     setSaving(true);
     try {
+      console.log(formData);
       await onUpdate(camera.id, {
         name: formData.name,
         location: formData.location,
         rtsp_url: formData.rtsp_url,
+        alert_email: formData.alert_email,
+        email_enabled: formData.email_enabled,
+        cooldown_seconds: formData.cooldown_seconds,
         fps: formData.fps,
         features: {
           ...formData.features,
@@ -2351,7 +2415,67 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
           }
           sx={{ mb: 3 }}
         />
+        <Divider sx={{ my: 2 }}>
+          <Chip icon={<Email />} label="Alert Configuration" />
+        </Divider>
 
+        <TextField
+          fullWidth
+          label="Alert Email Address"
+          type="email"
+          value={formData.alert_email || ""}
+          onChange={(e) =>
+            setFormData({ ...formData, alert_email: e.target.value })
+          }
+          sx={{ mb: 2 }}
+        />
+
+        <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={formData.email_enabled || false}
+                onChange={(e) =>
+                  setFormData({ ...formData, email_enabled: e.target.checked })
+                }
+              />
+            }
+            label="Email Alerts Enabled"
+          />
+          <TextField
+            label="Cooldown (seconds)"
+            type="number"
+            value={formData.cooldown_seconds || 60}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                cooldown_seconds: parseInt(e.target.value),
+              })
+            }
+            sx={{ width: 200 }}
+          />
+        </Box>
+
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={async () => {
+            try {
+              await fetch(
+                `http://localhost:8000/api/v1/alerts/${camera.id}/test-email`,
+                {
+                  method: "POST",
+                },
+              );
+              alert("Test email sent!");
+            } catch (error) {
+              console.error("Error sending test email:", error);
+              alert("Failed to send test email");
+            }
+          }}
+        >
+          Send Test Email
+        </Button>
         <Typography variant="subtitle2" gutterBottom>
           Features
         </Typography>
@@ -2583,7 +2707,138 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
             </AccordionDetails>
           </Accordion>
         ))}
+        {/* Alert Configuration Section */}
+        <Divider sx={{ my: 3 }}>
+          <Chip icon={<Notifications />} label="Alert Thresholds" />
+        </Divider>
 
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Configure alerts for selected classes. Alerts will be sent via email
+          and displayed in real-time.
+        </Alert>
+
+        {formData.tracking_classes?.map(
+          (
+            className: string, // Use speedClasses, distanceClasses for other tabs
+          ) => (
+            <Paper
+              key={className}
+              sx={{ p: 2, mb: 2, bgcolor: "background.default" }}
+            >
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  mb: 1,
+                }}
+              >
+                <Typography variant="subtitle2" fontWeight="bold">
+                  {className}
+                </Typography>
+                <Checkbox
+                  checked={trackingAlerts[className]?.enabled || false}
+                  onChange={(e) => {
+                    setTrackingAlerts((prev) => ({
+                      ...prev,
+                      [className]: {
+                        enabled: e.target.checked,
+                        threshold: prev[className]?.threshold || 30,
+                        condition: "over",
+                      },
+                    }));
+                  }}
+                />
+              </Box>
+
+              {trackingAlerts[className]?.enabled && (
+                <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
+                  <FormControl sx={{ minWidth: 120 }}>
+                    <InputLabel>Condition</InputLabel>
+                    <Select
+                      value={trackingAlerts[className]?.condition || "over"}
+                      onChange={(e) => {
+                        setTrackingAlerts((prev) => ({
+                          ...prev,
+                          [className]: {
+                            ...prev[className],
+                            condition: e.target.value as "over" | "under",
+                          },
+                        }));
+                      }}
+                      label="Condition"
+                      size="small"
+                    >
+                      <MenuItem value="over">Over</MenuItem>
+                      <MenuItem value="under">Under</MenuItem>
+                    </Select>
+                  </FormControl>
+
+                  <TextField
+                    label="Threshold (seconds)" // Use km/h for speed, meters for distance
+                    type="number"
+                    value={trackingAlerts[className]?.threshold || 30}
+                    onChange={(e) => {
+                      setTrackingAlerts((prev) => ({
+                        ...prev,
+                        [className]: {
+                          ...prev[className],
+                          threshold: parseFloat(e.target.value),
+                        },
+                      }));
+                    }}
+                    size="small"
+                    sx={{ flex: 1 }}
+                  />
+                </Box>
+              )}
+            </Paper>
+          ),
+        )}
+
+        {/* Save Alert Configuration Button */}
+        <Button
+          variant="contained"
+          fullWidth
+          onClick={async () => {
+            try {
+              const alertConfig = {
+                tracking_alerts: Object.entries(trackingAlerts) // Use speed_alerts, distance_alerts for other tabs
+                  .filter(([_, config]) => config.enabled)
+                  .map(([className, config]) => ({
+                    enabled: true,
+                    object_class: className,
+                    threshold_seconds: config.threshold, // Use threshold_kmh, threshold_meters for other tabs
+                    condition: config.condition,
+                  })),
+                email_enabled: formData.email_enabled,
+                cooldown_seconds: formData.cooldown_seconds,
+              };
+
+              const response = await fetch(
+                `http://localhost:8000/api/v1/alerts/${camera.id}/config`,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(alertConfig),
+                },
+              );
+
+              if (response.ok) {
+                alert("Alert configuration saved!");
+              } else {
+                throw new Error("Failed to save alert configuration");
+              }
+            } catch (error) {
+              console.error("Error saving alert configuration:", error);
+              alert("Failed to save alert configuration");
+            }
+          }}
+          startIcon={<Save />}
+          sx={{ mt: 2 }}
+        >
+          Save Alert Configuration
+        </Button>
         <Button
           variant="contained"
           fullWidth
@@ -2659,7 +2914,138 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
             </AccordionDetails>
           </Accordion>
         ))}
+        {/* Alert Configuration Section */}
+        <Divider sx={{ my: 3 }}>
+          <Chip icon={<Notifications />} label="Alert Thresholds" />
+        </Divider>
 
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Configure alerts for selected classes. Alerts will be sent via email
+          and displayed in real-time.
+        </Alert>
+
+        {formData.speed_classes?.map(
+          (
+            className: string, // Use speedClasses, distanceClasses for other tabs
+          ) => (
+            <Paper
+              key={className}
+              sx={{ p: 2, mb: 2, bgcolor: "background.default" }}
+            >
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  mb: 1,
+                }}
+              >
+                <Typography variant="subtitle2" fontWeight="bold">
+                  {className}
+                </Typography>
+                <Checkbox
+                  checked={speedAlerts[className]?.enabled || false}
+                  onChange={(e) => {
+                    setSpeedAlerts((prev) => ({
+                      ...prev,
+                      [className]: {
+                        enabled: e.target.checked,
+                        threshold: prev[className]?.threshold || 30,
+                        condition: "over",
+                      },
+                    }));
+                  }}
+                />
+              </Box>
+
+              {speedAlerts[className]?.enabled && (
+                <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
+                  <FormControl sx={{ minWidth: 120 }}>
+                    <InputLabel>Condition</InputLabel>
+                    <Select
+                      value={speedAlerts[className]?.condition || "over"}
+                      onChange={(e) => {
+                        setSpeedAlerts((prev) => ({
+                          ...prev,
+                          [className]: {
+                            ...prev[className],
+                            condition: e.target.value as "over" | "under",
+                          },
+                        }));
+                      }}
+                      label="Condition"
+                      size="small"
+                    >
+                      <MenuItem value="over">Over</MenuItem>
+                      <MenuItem value="under">Under</MenuItem>
+                    </Select>
+                  </FormControl>
+
+                  <TextField
+                    label="Threshold (seconds)" // Use km/h for speed, meters for distance
+                    type="number"
+                    value={speedAlerts[className]?.threshold || 30}
+                    onChange={(e) => {
+                      setSpeedAlerts((prev) => ({
+                        ...prev,
+                        [className]: {
+                          ...prev[className],
+                          threshold: parseFloat(e.target.value),
+                        },
+                      }));
+                    }}
+                    size="small"
+                    sx={{ flex: 1 }}
+                  />
+                </Box>
+              )}
+            </Paper>
+          ),
+        )}
+
+        {/* Save Alert Configuration Button */}
+        <Button
+          variant="contained"
+          fullWidth
+          onClick={async () => {
+            try {
+              const alertConfig = {
+                speedAlerts: Object.entries(speedAlerts) // Use speed_alerts, distance_alerts for other tabs
+                  .filter(([_, config]) => config.enabled)
+                  .map(([className, config]) => ({
+                    enabled: true,
+                    object_class: className,
+                    threshold_seconds: config.threshold, // Use threshold_kmh, threshold_meters for other tabs
+                    condition: config.condition,
+                  })),
+                email_enabled: formData.email_enabled,
+                cooldown_seconds: formData.cooldown_seconds,
+              };
+
+              const response = await fetch(
+                `http://localhost:8000/api/v1/alerts/${camera.id}/config`,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(alertConfig),
+                },
+              );
+
+              if (response.ok) {
+                alert("Alert configuration saved!");
+              } else {
+                throw new Error("Failed to save alert configuration");
+              }
+            } catch (error) {
+              console.error("Error saving alert configuration:", error);
+              alert("Failed to save alert configuration");
+            }
+          }}
+          startIcon={<Save />}
+          sx={{ mt: 2 }}
+        >
+          Save Alert Configuration
+        </Button>
         <Button
           variant="contained"
           fullWidth
@@ -2746,7 +3132,138 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
             </AccordionDetails>
           </Accordion>
         ))}
+        {/* Alert Configuration Section */}
+        <Divider sx={{ my: 3 }}>
+          <Chip icon={<Notifications />} label="Alert Thresholds" />
+        </Divider>
 
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Configure alerts for selected classes. Alerts will be sent via email
+          and displayed in real-time.
+        </Alert>
+
+        {formData.distance_classes?.map(
+          (
+            className: string, // Use speedClasses, distanceClasses for other tabs
+          ) => (
+            <Paper
+              key={className}
+              sx={{ p: 2, mb: 2, bgcolor: "background.default" }}
+            >
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  mb: 1,
+                }}
+              >
+                <Typography variant="subtitle2" fontWeight="bold">
+                  {className}
+                </Typography>
+                <Checkbox
+                  checked={distanceAlerts[className]?.enabled || false}
+                  onChange={(e) => {
+                    setDistanceAlerts((prev) => ({
+                      ...prev,
+                      [className]: {
+                        enabled: e.target.checked,
+                        threshold: prev[className]?.threshold || 30,
+                        condition: "over",
+                      },
+                    }));
+                  }}
+                />
+              </Box>
+
+              {distanceAlerts[className]?.enabled && (
+                <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
+                  <FormControl sx={{ minWidth: 120 }}>
+                    <InputLabel>Condition</InputLabel>
+                    <Select
+                      value={distanceAlerts[className]?.condition || "over"}
+                      onChange={(e) => {
+                        setDistanceAlerts((prev) => ({
+                          ...prev,
+                          [className]: {
+                            ...prev[className],
+                            condition: e.target.value as "over" | "under",
+                          },
+                        }));
+                      }}
+                      label="Condition"
+                      size="small"
+                    >
+                      <MenuItem value="over">Over</MenuItem>
+                      <MenuItem value="under">Under</MenuItem>
+                    </Select>
+                  </FormControl>
+
+                  <TextField
+                    label="Threshold (seconds)" // Use km/h for speed, meters for distance
+                    type="number"
+                    value={distanceAlerts[className]?.threshold || 30}
+                    onChange={(e) => {
+                      setDistanceAlerts((prev) => ({
+                        ...prev,
+                        [className]: {
+                          ...prev[className],
+                          threshold: parseFloat(e.target.value),
+                        },
+                      }));
+                    }}
+                    size="small"
+                    sx={{ flex: 1 }}
+                  />
+                </Box>
+              )}
+            </Paper>
+          ),
+        )}
+
+        {/* Save Alert Configuration Button */}
+        <Button
+          variant="contained"
+          fullWidth
+          onClick={async () => {
+            try {
+              const alertConfig = {
+                distance_alerts: Object.entries(distanceAlerts) // Use speed_alerts, distance_alerts for other tabs
+                  .filter(([_, config]) => config.enabled)
+                  .map(([className, config]) => ({
+                    enabled: true,
+                    object_class: className,
+                    threshold_seconds: config.threshold, // Use threshold_kmh, threshold_meters for other tabs
+                    condition: config.condition,
+                  })),
+                email_enabled: formData.email_enabled,
+                cooldown_seconds: formData.cooldown_seconds,
+              };
+
+              const response = await fetch(
+                `http://localhost:8000/api/v1/alerts/${camera.id}/config`,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(alertConfig),
+                },
+              );
+
+              if (response.ok) {
+                alert("Alert configuration saved!");
+              } else {
+                throw new Error("Failed to save alert configuration");
+              }
+            } catch (error) {
+              console.error("Error saving alert configuration:", error);
+              alert("Failed to save alert configuration");
+            }
+          }}
+          startIcon={<Save />}
+          sx={{ mt: 2 }}
+        >
+          Save Alert Configuration
+        </Button>
         <Button
           variant="contained"
           fullWidth
@@ -3426,7 +3943,7 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
   );
 
   if (embedded) {
-    return <Box sx={{ height: "100%", overflow: "auto" }}>{content}</Box>;
+    return <Box sx={{ height: "90%", overflow: "auto" }}>{content}</Box>;
   }
 
   return (
