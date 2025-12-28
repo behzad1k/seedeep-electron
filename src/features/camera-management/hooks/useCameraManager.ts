@@ -1,8 +1,7 @@
 import { BackendCamera, Camera, IpcResponse } from "@shared/types";
-import HLSStreamManager from "@utils/hls/HLSStreamManager.ts";
 import { WebSocketPool } from "@utils/websocket/WebsocketPool";
-import { useState, useCallback, useEffect, useRef } from "react";
-const hlsManager = HLSStreamManager.getInstance("http://localhost:8081");
+import { useState, useCallback, useEffect } from "react";
+
 export const useCameraManager = () => {
 	const [cameras, setCameras] = useState<Camera[]>([]);
 	const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null);
@@ -10,8 +9,6 @@ export const useCameraManager = () => {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
-	// Track WebSocket connections per camera
-	const wsConnectionsRef = useRef<Map<string, () => void>>(new Map());
 	const isElectron = typeof window !== "undefined" && window.electronAPI;
 
 	/**
@@ -42,7 +39,6 @@ export const useCameraManager = () => {
 			isCalibrated: cam.is_calibrated,
 			pixelsPerMeter: cam.pixels_per_meter,
 			calibrationMode: cam.calibration_mode,
-			// Enhanced features
 			features: cam.features || {},
 			alert_email: cam.alert_email,
 			alert_config: cam.alert_config,
@@ -50,48 +46,6 @@ export const useCameraManager = () => {
 		}),
 		[],
 	);
-
-	/**
-	 * Connect camera to WebSocket
-	 */
-	const connectCameraWebSocket = useCallback((camera: Camera) => {
-		const wsUrl = `ws://localhost:8000/ws/camera/${camera.id}`;
-		const pool = WebSocketPool.getInstance();
-
-		// Unsubscribe if already connected
-		const existingUnsubscribe = wsConnectionsRef.current.get(camera.id);
-		if (existingUnsubscribe) {
-			existingUnsubscribe();
-		}
-
-		// Subscribe to camera's WebSocket
-		const unsubscribe = pool.subscribe(
-			wsUrl,
-			camera.id,
-			(data: any) => {
-				console.log(`[Camera ${camera.id}] Received data:`, data);
-				// Handle incoming data - update UI, trigger events, etc.
-			},
-			(error: any) => {
-				console.error(`[Camera ${camera.id}] WebSocket error:`, error);
-			},
-		);
-
-		wsConnectionsRef.current.set(camera.id, unsubscribe);
-		console.log(`✅ Connected WebSocket for camera ${camera.id}`);
-	}, []);
-
-	/**
-	 * Disconnect camera from WebSocket
-	 */
-	const disconnectCameraWebSocket = useCallback((cameraId: string) => {
-		const unsubscribe = wsConnectionsRef.current.get(cameraId);
-		if (unsubscribe) {
-			unsubscribe();
-			wsConnectionsRef.current.delete(cameraId);
-			console.log(`🔴 Disconnected WebSocket for camera ${cameraId}`);
-		}
-	}, []);
 
 	/**
 	 * Fetch all cameras from backend
@@ -112,16 +66,16 @@ export const useCameraManager = () => {
 					await window.electronAPI.camera.getAll();
 
 				if (response.success && response.data) {
-					const transformedCameras = response.data.map(transformCamera);
-					console.log(response.data, transformedCameras);
+					const transformedCameras = Array.isArray(response.data)
+						? response.data.map(transformCamera)
+						: [];
 					setCameras(transformedCameras);
+					console.log(
+						`[CameraManager] Loaded ${transformedCameras.length} cameras`,
+					);
 
-					// Connect WebSocket for each active camera
-					transformedCameras.forEach((camera) => {
-						if (camera.status === "online") {
-							// connectCameraWebSocket(camera);
-						}
-					});
+					// WebSocket connections are managed by WebSocketPool
+					// No need to manually connect/disconnect here
 				} else {
 					setError(response.error || "Failed to fetch cameras");
 					console.error("Failed to fetch cameras:", response.error);
@@ -135,7 +89,7 @@ export const useCameraManager = () => {
 				setLoading(false);
 			}
 		},
-		[isElectron, transformCamera, connectCameraWebSocket],
+		[isElectron, transformCamera],
 	);
 
 	/**
@@ -155,22 +109,9 @@ export const useCameraManager = () => {
 				if (response.success && response.data) {
 					await fetchCameras();
 
-					// Connect WebSocket for new camera
-					const newCamera = transformCamera(response.data);
-					if (newCamera.rtsp_url) {
-						const hlsUrl = await hlsManager.startStream(
-							newCamera.id,
-							newCamera.rtsp_url,
-						);
-						if (hlsUrl) {
-							console.log(`✅ HLS stream available: ${hlsUrl}`);
-						}
-					}
+					console.log(`[CameraManager] Created camera: ${response.data.id}`);
 
-					if (newCamera.status === "online") {
-						// connectCameraWebSocket(newCamera);
-					}
-
+					// WebSocket will auto-connect when components subscribe
 					return response.data;
 				} else {
 					console.error("Failed to create camera:", response.error);
@@ -181,7 +122,7 @@ export const useCameraManager = () => {
 				return null;
 			}
 		},
-		[isElectron, fetchCameras, transformCamera, connectCameraWebSocket],
+		[isElectron, fetchCameras],
 	);
 
 	/**
@@ -224,14 +165,17 @@ export const useCameraManager = () => {
 			}
 
 			try {
-				// Disconnect WebSocket first
-				disconnectCameraWebSocket(cameraId);
-				await hlsManager.stopStream(cameraId);
 				const response: IpcResponse<void> =
 					await window.electronAPI.camera.delete(cameraId);
 
 				if (response.success) {
 					await fetchCameras();
+
+					// Force disconnect WebSocket (will auto-cleanup if no subscribers)
+					const pool = WebSocketPool.getInstance();
+					pool.forceDisconnect(cameraId);
+
+					console.log(`[CameraManager] Deleted camera: ${cameraId}`);
 					return true;
 				} else {
 					console.error("Failed to delete camera:", response.error);
@@ -242,7 +186,7 @@ export const useCameraManager = () => {
 				return false;
 			}
 		},
-		[isElectron, fetchCameras, disconnectCameraWebSocket],
+		[isElectron, fetchCameras],
 	);
 
 	/**
@@ -279,14 +223,20 @@ export const useCameraManager = () => {
 		fetchCameras();
 	}, [fetchCameras]);
 
-	// Cleanup WebSocket connections on unmount
+	// Cleanup on unmount
 	useEffect(() => {
 		return () => {
-			wsConnectionsRef.current.forEach((unsubscribe) => {
-				unsubscribe();
-			});
-			wsConnectionsRef.current.clear();
+			// WebSocketPool handles cleanup automatically
+			console.log(
+				"[CameraManager] Cleanup - WebSocket connections managed by pool",
+			);
 		};
+	}, []);
+
+	// Get WebSocket stats for debugging
+	const getWebSocketStats = useCallback(() => {
+		const pool = WebSocketPool.getInstance();
+		return pool.getAllStats();
 	}, []);
 
 	return {
@@ -303,7 +253,6 @@ export const useCameraManager = () => {
 		updateCameraFeatures,
 		deleteCamera,
 		calibrateCamera,
-		connectCameraWebSocket,
-		disconnectCameraWebSocket,
+		getWebSocketStats, // For debugging
 	};
 };

@@ -4,7 +4,6 @@
 // ============================================
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { WebSocketPool } from "@utils/websocket/WebsocketPool.ts";
 import {
   Drawer,
   Box,
@@ -69,6 +68,7 @@ import {
 import { useTheme } from "@/contexts/ThemeContext";
 import { BackendCamera } from "@shared/types";
 import { MODEL_DEFINITIONS } from "@utils/models/modelDefinitions";
+import { useCameraSidebarData } from "../hooks/useCameraSidebarData";
 
 interface CameraDetailSidebarProps {
   open: boolean;
@@ -198,10 +198,8 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
   const { darkMode } = useTheme();
   const [activeTab, setActiveTab] = useState(0);
   const [formData, setFormData] = useState<any>({});
-  const [logs, setLogs] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const [currentFrame, setCurrentFrame] = useState<any>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   // Calibration state
@@ -265,6 +263,11 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
   const [currentDirection, setCurrentDirection] = useState<string>("");
   const moveTimeoutRef = useRef<any | null>(null);
 
+  const { currentFrame, logs } = useCameraSidebarData({
+    cameraId: camera?.id || "",
+    enabled: !!camera && open,
+  });
+
   useEffect(() => {
     if (camera) {
       console.log(camera);
@@ -313,39 +316,6 @@ export const CameraDetailSidebar: React.FC<CameraDetailSidebarProps> = ({
     };
 
     loadAlertConfig();
-  }, [camera?.id]);
-
-  // Subscribe to WebSocket for logs
-  useEffect(() => {
-    if (!camera) return;
-
-    const pool = WebSocketPool.getInstance();
-    const wsUrl = `ws://localhost:8000/ws/camera/${camera.id}`;
-
-    unsubscribeRef.current = pool.subscribe(
-      wsUrl,
-      `sidebar-${camera.id}`,
-      (data) => {
-        setCurrentFrame(data);
-        setLogs((prev) => [
-          {
-            timestamp: new Date(),
-            data: data,
-          },
-          ...prev.slice(0, 49),
-        ]);
-      },
-      (err) => {
-        console.error("[CameraDetailSidebar] WebSocket error:", err);
-      },
-    );
-
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-      }
-    };
   }, [camera?.id]);
 
   const handleSave = async () => {

@@ -76,6 +76,7 @@ cat > build/backend/.env << 'ENV_EOF'
 DEBUG=false
 HOST=127.0.0.1
 PORT=8000
+MODEL_FORMAT=onnx
 DATABASE_URL=sqlite+aiosqlite:///./seedeep.db
 CONFIDENCE_THRESHOLD=0.25
 IOU_THRESHOLD=0.45
@@ -83,6 +84,13 @@ MAX_DETECTIONS=100
 FORCE_CPU=false
 ALLOWED_ORIGINS=*
 LOG_LEVEL=INFO
+SMTP_USE_TLS=true
+SMTP_FROM_NAME=SeeDeep.AI Alerts
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=behzadkoohyani@gmail.com
+SMTP_PASSWORD=vkoq iyvb wkjd gieg
+SMTP_FROM_EMAIL=noreply@swgz.com
 ENV_EOF
 
 echo "✅ Production .env created"
@@ -111,11 +119,11 @@ echo "🧹 Cleaning Python environment for code signing..."
 cd build/backend/python-env/bin
 
 # Keep only python3 and essential scripts
-for file in *; do
-    if [[ "$file" != "python3" && "$file" != "python" && "$file" != "activate"* && "$file" != "pip"* ]]; then
-        rm -f "$file"
-    fi
-done
+# for file in *; do
+#     if [[ "$file" != "python3" && "$file" != "python" && "$file" != "activate"* && "$file" != "pip"* ]]; then
+#         rm -f "$file"
+#     fi
+# done
 
 # Remove signature from python binary to avoid signing conflicts
 if [ -f "python3" ]; then
@@ -131,11 +139,11 @@ cd ../../../..
 
 # Remove unnecessary files from site-packages
 echo "🧹 Removing unnecessary files..."
-find build/backend/python-env/lib -name "*.pyc" -delete
-find build/backend/python-env/lib -name "*.pyo" -delete
-find build/backend/python-env/lib -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-find build/backend/python-env/lib -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
-find build/backend/python-env/lib -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
+# find build/backend/python-env/lib -name "*.pyc" -delete
+# find build/backend/python-env/lib -name "*.pyo" -delete
+# find build/backend/python-env/lib -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+# find build/backend/python-env/lib -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
+# find build/backend/python-env/lib -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Create startup script (unchanged - stays the same)
 echo "📝 Creating startup script..."

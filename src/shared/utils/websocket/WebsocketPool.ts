@@ -1,54 +1,71 @@
 /**
- * WebSocketPool - Manages WebSocket connections efficiently
- * Prevents duplicate connections and handles reconnection logic
+ * Enhanced WebSocketPool - Persistent camera connections
+ * Maintains one connection per camera, shared across all components
  */
 
-interface WSConnection {
+interface CameraSubscriber {
+	id: string;
+	onFrame?: (data: any) => void;
+	onMessage?: (data: any) => void;
+	onError?: (error: any) => void;
+	priority?: "high" | "normal" | "low"; // For frame distribution
+}
+
+interface CameraConnection {
 	ws: WebSocket;
 	url: string;
-	subscribers: Map<
-		string,
-		{
-			onMessage: (data: any) => void;
-			onError: (error: any) => void;
-		}
-	>;
+	cameraId: string;
+	subscribers: Map<string, CameraSubscriber>;
 	reconnectAttempts: number;
 	reconnectTimer: any | null;
 	isConnecting: boolean;
+	lastFrameTime: number;
+	frameCount: number;
+	latency: number;
+	// Frame buffering
+	lastFrame: any | null;
+	frameBuffer: any[];
+	maxBufferSize: number;
+	// Performance tracking
+	bytesReceived: number;
+	messagesReceived: number;
+	lastActivityTime: number;
+}
+
+interface ConnectionStats {
+	cameraId: string;
+	isConnected: boolean;
+	subscriberCount: number;
+	reconnectAttempts: number;
+	frameCount: number;
+	latency: number;
+	uptime: number;
+	bytesReceived: number;
+	messagesReceived: number;
 }
 
 export class WebSocketPool {
 	private static instance: WebSocketPool;
-	private connections: Map<string, WSConnection> = new Map();
-	private maxReconnectAttempts = 5;
-	private reconnectDelay = 3000;
-	private maxConnections = 10;
-	private connectionTimeouts: Map<string, any> = new Map();
-	private lastActivityTime: Map<string, number> = new Map();
-	private inactivityTimeout = 60000; // 60 seconds
+	private connections: Map<string, CameraConnection> = new Map(); // Key: cameraId
+	private readonly maxReconnectAttempts = 10;
+	private readonly reconnectDelay = 2000;
+	private readonly inactivityTimeout = 120000; // 2 minutes
+	private cleanupInterval: any;
 
-	// Add cleanup for inactive connections
-	private cleanupInactiveConnections(): void {
-		const now = Date.now();
+	private constructor() {
+		// Periodic cleanup of inactive connections
+		this.cleanupInterval = setInterval(() => {
+			this.cleanupInactiveConnections();
+		}, 30000); // Every 30 seconds
 
-		this.connections.forEach((connection, url) => {
-			const lastActivity = this.lastActivityTime.get(url) || now;
-
-			// Close connections with no subscribers that have been inactive
-			if (
-				connection.subscribers.size === 0 &&
-				now - lastActivity > this.inactivityTimeout
-			) {
-				console.log(`[WebSocketPool] Cleaning up inactive connection: ${url}`);
-				this.closeConnection(url);
-			}
-		});
+		// Handle page unload
+		if (typeof window !== "undefined") {
+			window.addEventListener("beforeunload", () => {
+				this.disconnectAll();
+			});
+		}
 	}
 
-	constructor() {
-		setInterval(() => this.cleanupInactiveConnections(), 30000); // Every 30 seconds
-	}
 	static getInstance(): WebSocketPool {
 		if (!WebSocketPool.instance) {
 			WebSocketPool.instance = new WebSocketPool();
@@ -57,56 +74,80 @@ export class WebSocketPool {
 	}
 
 	/**
-	 * Subscribe to a WebSocket connection
+	 * Subscribe to a camera's WebSocket feed
+	 * Creates connection if it doesn't exist, otherwise reuses existing
 	 */
 	subscribe(
-		url: string,
+		cameraId: string,
 		subscriberId: string,
-		onMessage: (data: any) => void,
-		onError: (error: any) => void,
+		callbacks: {
+			onFrame?: (data: any) => void;
+			onMessage?: (data: any) => void;
+			onError?: (error: any) => void;
+			priority?: "high" | "normal" | "low";
+		},
 	): () => void {
 		console.log(
-			`[WebSocketPool] Subscribe request - URL: ${url}, Subscriber: ${subscriberId}`,
+			`[WebSocketPool] Subscribe: Camera ${cameraId}, Subscriber: ${subscriberId}`,
 		);
 
-		let connection = this.connections.get(url);
+		let connection = this.connections.get(cameraId);
 
-		// If connection exists and has this subscriber, return existing unsubscribe
-		if (connection && connection.subscribers.has(subscriberId)) {
-			console.log(
-				`[WebSocketPool] Subscriber ${subscriberId} already exists for ${url}`,
-			);
-			return () => this.unsubscribe(url, subscriberId);
-		}
-
-		// Create new connection if it doesn't exist
+		// Create connection if it doesn't exist
 		if (!connection) {
-			console.log(`[WebSocketPool] Creating new connection for ${url}`);
-			connection = this.createConnection(url);
-			this.connections.set(url, connection);
+			const wsUrl = this.buildWebSocketURL(cameraId);
+			connection = this.createConnection(cameraId, wsUrl);
+			this.connections.set(cameraId, connection);
 		}
 
-		// Add subscriber
-		connection.subscribers.set(subscriberId, { onMessage, onError });
+		// Check if subscriber already exists
+		if (connection.subscribers.has(subscriberId)) {
+			console.log(
+				`[WebSocketPool] Subscriber ${subscriberId} already exists for camera ${cameraId}`,
+			);
+			// Update callbacks
+			connection.subscribers.set(subscriberId, {
+				id: subscriberId,
+				...callbacks,
+			});
+			return () => this.unsubscribe(cameraId, subscriberId);
+		}
+
+		// Add new subscriber
+		connection.subscribers.set(subscriberId, {
+			id: subscriberId,
+			...callbacks,
+			priority: callbacks.priority || "normal",
+		});
+
 		console.log(
-			`[WebSocketPool] Added subscriber ${subscriberId}. Total subscribers: ${connection.subscribers.size}`,
+			`[WebSocketPool] Added subscriber ${subscriberId} to camera ${cameraId}. Total: ${connection.subscribers.size}`,
 		);
+
+		// Send last frame to new subscriber if available
+		if (connection.lastFrame && callbacks.onFrame) {
+			setTimeout(() => {
+				if (connection?.lastFrame) {
+					callbacks.onFrame!(connection.lastFrame);
+				}
+			}, 0);
+		}
 
 		// Return unsubscribe function
-		return () => this.unsubscribe(url, subscriberId);
+		return () => this.unsubscribe(cameraId, subscriberId);
 	}
 
 	/**
-	 * Unsubscribe from a WebSocket connection
+	 * Unsubscribe from a camera feed
 	 */
-	private unsubscribe(url: string, subscriberId: string): void {
+	private unsubscribe(cameraId: string, subscriberId: string): void {
 		console.log(
-			`[WebSocketPool] Unsubscribe - URL: ${url}, Subscriber: ${subscriberId}`,
+			`[WebSocketPool] Unsubscribe: Camera ${cameraId}, Subscriber: ${subscriberId}`,
 		);
 
-		const connection = this.connections.get(url);
+		const connection = this.connections.get(cameraId);
 		if (!connection) {
-			console.log(`[WebSocketPool] No connection found for ${url}`);
+			console.log(`[WebSocketPool] No connection found for camera ${cameraId}`);
 			return;
 		}
 
@@ -115,84 +156,122 @@ export class WebSocketPool {
 			`[WebSocketPool] Removed subscriber ${subscriberId}. Remaining: ${connection.subscribers.size}`,
 		);
 
-		// Close connection if no more subscribers
-		if (connection.subscribers.size === 0) {
-			console.log(
-				`[WebSocketPool] No more subscribers, closing connection for ${url}`,
-			);
-			this.closeConnection(url);
-		}
+		// DON'T close connection immediately - let cleanup handle it
+		// This prevents unnecessary reconnections
+		connection.lastActivityTime = Date.now();
 	}
 
 	/**
-	 * Create a new WebSocket connection
+	 * Build WebSocket URL for camera
 	 */
-	private createConnection(url: string): WSConnection {
+	private buildWebSocketURL(cameraId: string): string {
+		const baseUrl = "ws://localhost:8000";
+		return `${baseUrl}/ws/camera/${cameraId}`;
+	}
+
+	/**
+	 * Create a new WebSocket connection for a camera
+	 */
+	private createConnection(cameraId: string, url: string): CameraConnection {
+		console.log(`[WebSocketPool] Creating connection for camera ${cameraId}`);
+
 		const ws = new WebSocket(url);
 
-		const connection: WSConnection = {
+		const connection: CameraConnection = {
 			ws,
 			url,
+			cameraId,
 			subscribers: new Map(),
 			reconnectAttempts: 0,
 			reconnectTimer: null,
 			isConnecting: true,
+			lastFrameTime: 0,
+			frameCount: 0,
+			latency: 0,
+			lastFrame: null,
+			frameBuffer: [],
+			maxBufferSize: 3, // Keep last 3 frames
+			bytesReceived: 0,
+			messagesReceived: 0,
+			lastActivityTime: Date.now(),
 		};
 
+		// Connection opened
 		ws.onopen = () => {
-			console.log(`[WebSocketPool] Connected to ${url}`);
+			console.log(`[WebSocketPool] ✅ Connected to camera ${cameraId}`);
 			connection.isConnecting = false;
 			connection.reconnectAttempts = 0;
+			connection.lastActivityTime = Date.now();
 		};
 
+		// Message received
 		ws.onmessage = (event) => {
-			this.lastActivityTime.set(url, Date.now());
+			const receiveTime = Date.now();
+			connection.lastActivityTime = receiveTime;
+			connection.messagesReceived++;
 
 			try {
+				// Track data size
+				if (typeof event.data === "string") {
+					connection.bytesReceived += event.data.length;
+				} else if (event.data instanceof ArrayBuffer) {
+					connection.bytesReceived += event.data.byteLength;
+				}
+
 				const data = JSON.parse(event.data);
 
-				connection.subscribers.forEach((subscriber) => {
-					try {
-						subscriber.onMessage(data);
-					} catch (error) {
-						console.error(
-							`[WebSocketPool] Error in subscriber message handler:`,
-							error,
-						);
-					}
-				});
+				// Calculate latency
+				if (data.timestamp) {
+					connection.latency = receiveTime - data.timestamp;
+				}
+
+				// Update frame tracking
+				connection.lastFrameTime = receiveTime;
+				connection.frameCount++;
+
+				// Store frame in buffer (FIFO)
+				connection.lastFrame = data;
+				connection.frameBuffer.push(data);
+				if (connection.frameBuffer.length > connection.maxBufferSize) {
+					connection.frameBuffer.shift();
+				}
+
+				// Distribute to subscribers based on priority
+				this.distributeFrame(connection, data);
 			} catch (error) {
-				console.error("[WebSocketPool] Error parsing message:", error);
+				console.error(
+					`[WebSocketPool] Error parsing message for camera ${cameraId}:`,
+					error,
+				);
+				this.notifySubscribersError(connection, error);
 			}
 		};
 
+		// Error occurred
 		ws.onerror = (error) => {
-			console.error(`[WebSocketPool] WebSocket error for ${url}:`, error);
-			connection.subscribers.forEach((subscriber) => {
-				subscriber.onError(error);
-			});
+			console.error(`[WebSocketPool] ❌ Error for camera ${cameraId}:`, error);
+			connection.isConnecting = false;
+			this.notifySubscribersError(connection, error);
 		};
 
+		// Connection closed
 		ws.onclose = (event) => {
 			console.log(
-				`[WebSocketPool] Connection closed for ${url}. Code: ${event.code}, Reason: ${event.reason}`,
+				`[WebSocketPool] Connection closed for camera ${cameraId}. Code: ${event.code}, Reason: ${event.reason}`,
 			);
 			connection.isConnecting = false;
 
-			// Only attempt reconnection if there are still subscribers
+			// Attempt reconnection if there are subscribers
 			if (
 				connection.subscribers.size > 0 &&
 				connection.reconnectAttempts < this.maxReconnectAttempts
 			) {
-				console.log(
-					`[WebSocketPool] Attempting to reconnect... (${connection.reconnectAttempts + 1}/${this.maxReconnectAttempts})`,
-				);
-				this.reconnect(url, connection);
+				this.scheduleReconnect(cameraId, connection);
 			} else if (connection.reconnectAttempts >= this.maxReconnectAttempts) {
 				console.error(
-					`[WebSocketPool] Max reconnection attempts reached for ${url}`,
+					`[WebSocketPool] Max reconnection attempts reached for camera ${cameraId}`,
 				);
-				this.connections.delete(url);
+				this.connections.delete(cameraId);
 			}
 		};
 
@@ -200,54 +279,126 @@ export class WebSocketPool {
 	}
 
 	/**
-	 * Reconnect to a WebSocket
+	 * Distribute frame to subscribers based on priority
 	 */
-	private reconnect(url: string, connection: WSConnection): void {
+	private distributeFrame(connection: CameraConnection, data: any): void {
+		// Sort subscribers by priority (high > normal > low)
+		const sortedSubscribers = Array.from(connection.subscribers.values()).sort(
+			(a, b) => {
+				const priorityOrder = { high: 3, normal: 2, low: 1 };
+				return (
+					priorityOrder[b.priority || "normal"] -
+					priorityOrder[a.priority || "normal"]
+				);
+			},
+		);
+
+		// Distribute frames
+		for (const subscriber of sortedSubscribers) {
+			try {
+				// Call onFrame if available
+				if (subscriber.onFrame) {
+					subscriber.onFrame(data);
+				}
+				// Call generic onMessage if available
+				if (subscriber.onMessage) {
+					subscriber.onMessage(data);
+				}
+			} catch (error) {
+				console.error(
+					`[WebSocketPool] Error in subscriber ${subscriber.id} handler:`,
+					error,
+				);
+			}
+		}
+	}
+
+	/**
+	 * Notify all subscribers of an error
+	 */
+	private notifySubscribersError(
+		connection: CameraConnection,
+		error: any,
+	): void {
+		connection.subscribers.forEach((subscriber) => {
+			try {
+				subscriber.onError?.(error);
+			} catch (err) {
+				console.error(
+					`[WebSocketPool] Error in subscriber error handler:`,
+					err,
+				);
+			}
+		});
+	}
+
+	/**
+	 * Schedule reconnection
+	 */
+	private scheduleReconnect(
+		cameraId: string,
+		connection: CameraConnection,
+	): void {
 		if (connection.reconnectTimer) {
 			clearTimeout(connection.reconnectTimer);
 		}
 
 		connection.reconnectAttempts++;
+		const delay =
+			this.reconnectDelay * Math.min(connection.reconnectAttempts, 5);
+
+		console.log(
+			`[WebSocketPool] Scheduling reconnect for camera ${cameraId} in ${delay}ms (attempt ${connection.reconnectAttempts}/${this.maxReconnectAttempts})`,
+		);
 
 		connection.reconnectTimer = setTimeout(() => {
+			// Check if still have subscribers
 			if (connection.subscribers.size === 0) {
 				console.log(
-					`[WebSocketPool] Aborting reconnect - no subscribers for ${url}`,
+					`[WebSocketPool] Aborting reconnect - no subscribers for camera ${cameraId}`,
 				);
-				this.connections.delete(url);
+				this.connections.delete(cameraId);
 				return;
 			}
 
-			console.log(`[WebSocketPool] Reconnecting to ${url}...`);
+			console.log(`[WebSocketPool] Reconnecting camera ${cameraId}...`);
 
-			const newConnection = this.createConnection(url);
+			const newConnection = this.createConnection(cameraId, connection.url);
 			newConnection.subscribers = connection.subscribers;
 			newConnection.reconnectAttempts = connection.reconnectAttempts;
 
-			this.connections.set(url, newConnection);
-		}, this.reconnectDelay);
+			this.connections.set(cameraId, newConnection);
+		}, delay);
 	}
 
-	private checkMemoryPressure(): boolean {
-		if ("memory" in performance) {
-			const memory = (performance as any).memory;
-			const usedMemory = memory.usedJSHeapSize / memory.jsHeapSizeLimit;
-
-			if (usedMemory > 0.9) {
-				console.warn(
-					"[WebSocketPool] High memory usage detected, limiting connections",
-				);
-				return true;
-			}
-		}
-		return false;
-	}
 	/**
-	 * Close a WebSocket connection
+	 * Cleanup inactive connections
 	 */
-	private closeConnection(url: string): void {
-		const connection = this.connections.get(url);
+	private cleanupInactiveConnections(): void {
+		const now = Date.now();
+
+		this.connections.forEach((connection, cameraId) => {
+			// Close connections with no subscribers that have been inactive
+			if (
+				connection.subscribers.size === 0 &&
+				now - connection.lastActivityTime > this.inactivityTimeout
+			) {
+				console.log(
+					`[WebSocketPool] 🧹 Cleaning up inactive connection for camera ${cameraId}`,
+				);
+				this.forceDisconnect(cameraId);
+			}
+		});
+	}
+
+	/**
+	 * Force disconnect a camera (close WebSocket)
+	 */
+	forceDisconnect(cameraId: string): void {
+		const connection = this.connections.get(cameraId);
 		if (!connection) return;
+
+		console.log(`[WebSocketPool] Force disconnecting camera ${cameraId}`);
 
 		if (connection.reconnectTimer) {
 			clearTimeout(connection.reconnectTimer);
@@ -260,134 +411,115 @@ export class WebSocketPool {
 			connection.ws.close();
 		}
 
-		this.connections.delete(url);
-		console.log(`[WebSocketPool] Closed and removed connection for ${url}`);
+		this.connections.delete(cameraId);
 	}
 
 	/**
-	 * Send raw binary data directly through the WebSocket
-	 * This is for webcam frame sending
+	 * Get the last frame for a camera (useful for new subscribers)
 	 */
-	sendRawBinary(url: string, data: ArrayBuffer): void {
-		const connection = this.connections.get(url);
-		if (!connection || connection.ws.readyState !== WebSocket.OPEN) {
-			console.warn(
-				`[WebSocketPool] Cannot send data - connection not ready for ${url}`,
-			);
-			return;
-		}
-
-		try {
-			connection.ws.send(data);
-		} catch (error) {
-			console.error(`[WebSocketPool] Error sending raw binary:`, error);
-		}
+	getLastFrame(cameraId: string): any | null {
+		const connection = this.connections.get(cameraId);
+		return connection?.lastFrame || null;
 	}
 
 	/**
-	 * Send binary frame data (legacy method - kept for compatibility)
+	 * Get connection stats for a camera
 	 */
-	sendBinaryFrame(
-		url: string,
-		data: {
-			cameraId: string;
-			timestamp: number;
-			imageData: ArrayBuffer;
-		},
-	): void {
-		const connection = this.connections.get(url);
-		if (!connection || connection.ws.readyState !== WebSocket.OPEN) {
-			console.warn(
-				`[WebSocketPool] Cannot send data - connection not ready for ${url}`,
-			);
-			return;
-		}
-
-		try {
-			const cameraIdBytes = new TextEncoder().encode(data.cameraId);
-			const headerSize = 1 + cameraIdBytes.length + 4;
-			const totalSize = headerSize + data.imageData.byteLength;
-
-			const buffer = new ArrayBuffer(totalSize);
-			const view = new DataView(buffer);
-			const uint8View = new Uint8Array(buffer);
-
-			let offset = 0;
-
-			// Camera ID length
-			view.setUint8(offset, cameraIdBytes.length);
-			offset += 1;
-
-			// Camera ID
-			uint8View.set(cameraIdBytes, offset);
-			offset += cameraIdBytes.length;
-
-			// Timestamp
-			view.setUint32(offset, data.timestamp, true);
-			offset += 4;
-
-			// Image data
-			uint8View.set(new Uint8Array(data.imageData), offset);
-
-			connection.ws.send(buffer);
-		} catch (error) {
-			console.error(`[WebSocketPool] Error sending binary frame:`, error);
-		}
-	}
-
-	/**
-	 * Get connection status
-	 */
-	getConnectionStatus(url: string): {
-		isConnected: boolean;
-		subscriberCount: number;
-		reconnectAttempts: number;
-	} | null {
-		const connection = this.connections.get(url);
+	getStats(cameraId: string): ConnectionStats | null {
+		const connection = this.connections.get(cameraId);
 		if (!connection) return null;
 
+		const uptime =
+			connection.lastFrameTime > 0 ? Date.now() - connection.lastFrameTime : 0;
+
 		return {
+			cameraId,
 			isConnected: connection.ws.readyState === WebSocket.OPEN,
 			subscriberCount: connection.subscribers.size,
 			reconnectAttempts: connection.reconnectAttempts,
+			frameCount: connection.frameCount,
+			latency: connection.latency,
+			uptime,
+			bytesReceived: connection.bytesReceived,
+			messagesReceived: connection.messagesReceived,
 		};
 	}
 
 	/**
-	 * Get the actual WebSocket for direct access (for webcam)
+	 * Get stats for all cameras
 	 */
-	getWebSocket(url: string): WebSocket | null {
-		const connection = this.connections.get(url);
-		return connection?.ws || null;
-	}
+	getAllStats(): ConnectionStats[] {
+		const stats: ConnectionStats[] = [];
 
-	/**
-	 * Close all connections
-	 */
-	closeAll(): void {
-		console.log("[WebSocketPool] Closing all connections");
-		this.connections.forEach((_, url) => {
-			this.closeConnection(url);
+		this.connections.forEach((_, cameraId) => {
+			const cameraStat = this.getStats(cameraId);
+			if (cameraStat) {
+				stats.push(cameraStat);
+			}
 		});
-		this.connections.clear();
+
+		return stats;
 	}
 
 	/**
-	 * Get debug info
+	 * Check if a camera is connected
+	 */
+	isConnected(cameraId: string): boolean {
+		const connection = this.connections.get(cameraId);
+		return connection?.ws.readyState === WebSocket.OPEN;
+	}
+
+	/**
+	 * Disconnect all cameras
+	 */
+	disconnectAll(): void {
+		console.log("[WebSocketPool] Disconnecting all cameras");
+
+		this.connections.forEach((_, cameraId) => {
+			this.forceDisconnect(cameraId);
+		});
+
+		this.connections.clear();
+
+		if (this.cleanupInterval) {
+			clearInterval(this.cleanupInterval);
+		}
+	}
+
+	/**
+	 * Get debug information
 	 */
 	getDebugInfo(): string {
 		const info: string[] = [];
+		info.push(`📊 WebSocket Pool Status`);
 		info.push(`Total connections: ${this.connections.size}`);
+		info.push("");
 
-		this.connections.forEach((conn, url) => {
-			info.push(`  ${url}:`);
-			info.push(
-				`    - State: ${["CONNECTING", "OPEN", "CLOSING", "CLOSED"][conn.ws.readyState]}`,
-			);
-			info.push(`    - Subscribers: ${conn.subscribers.size}`);
-			info.push(`    - Reconnect attempts: ${conn.reconnectAttempts}`);
+		this.connections.forEach((conn, cameraId) => {
+			const state = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"][
+				conn.ws.readyState
+			];
+			info.push(`📷 Camera: ${cameraId}`);
+			info.push(`  State: ${state}`);
+			info.push(`  Subscribers: ${conn.subscribers.size}`);
+			info.push(`  Reconnects: ${conn.reconnectAttempts}`);
+			info.push(`  Frames: ${conn.frameCount}`);
+			info.push(`  Latency: ${conn.latency}ms`);
+			info.push(`  Data: ${(conn.bytesReceived / 1024 / 1024).toFixed(2)}MB`);
+			info.push("");
 		});
 
 		return info.join("\n");
+	}
+
+	/**
+	 * Memory cleanup helper
+	 */
+	clearFrameBuffers(): void {
+		console.log("[WebSocketPool] Clearing frame buffers");
+		this.connections.forEach((connection) => {
+			connection.frameBuffer = [];
+			connection.lastFrame = null;
+		});
 	}
 }
