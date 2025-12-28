@@ -21,6 +21,4 @@ release
 Thumbs.db
 
 # Backend Files
-
-app/models/weights/*
-logs/app.log
+backend

@@ -25,15 +25,21 @@ export class BackendManager {
     }
     return BackendManager.instance;
   }
-
   private getBackendPath(): string {
     if (app.isPackaged) {
+      // In production, backend is in Resources folder
+      if (process.platform === 'win32') {
+        return path.join(process.resourcesPath, 'backend', 'start-backend.bat');
+      }
       return path.join(process.resourcesPath, 'backend', 'start-backend');
     } else {
-      return path.join(__dirname, '../../../main.py');
+      // In development
+      if (process.platform === 'win32') {
+        return path.join(__dirname, '../../../backend/main.py');
+      }
+      return path.join(__dirname, '../../../backend/main.py');
     }
   }
-
   private getBackendWorkingDir(): string {
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'backend');
@@ -205,7 +211,21 @@ export class BackendManager {
 
       if (app.isPackaged) {
         console.log('🏭 Running packaged backend');
-
+        if (process.platform === 'win32') {
+          // Windows: Run batch file directly
+          this.backendProcess = spawn('cmd.exe', ['/c', backendPath], {
+            env: {
+              ...process.env,
+              HOST: this.HOST,
+              PORT: this.PORT.toString(),
+              PYTHONUNBUFFERED: '1',
+              DATABASE_URL: `sqlite+aiosqlite:///${dbPath}`,
+              LOG_LEVEL: 'INFO',
+            },
+            cwd: workingDir,
+            stdio: ['ignore', 'pipe', 'pipe']
+          });
+        } else {
         // For M1/M2 Macs, we need to ensure the shell can execute the script
         const shellPath = '/bin/bash';
 
@@ -223,7 +243,9 @@ export class BackendManager {
           cwd: workingDir,
           stdio: ['ignore', 'pipe', 'pipe']
         });
-      } else {
+      }
+      }
+      else {
         console.log('🔧 Running development backend');
 
         const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';

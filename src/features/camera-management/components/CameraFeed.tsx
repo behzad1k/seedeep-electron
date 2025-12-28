@@ -83,7 +83,7 @@ export const CameraFeed = memo<CameraFeedProps>(
     const timeOffsetRef = useRef(0);
     const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
     const alertSoundRef = useRef<HTMLAudioElement | null>(null);
-    const alertTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+    const alertTimeoutsRef = useRef<Map<string, any>>(new Map());
 
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);

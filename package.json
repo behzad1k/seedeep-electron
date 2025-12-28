@@ -15,7 +15,10 @@
     "electron:build": "npm run build:all",
     "electron:build:mac": "npm run build:all --mac",
     "electron:build:mac:unsigned": "npm run build:backend && npm run build:frontend && electron-builder --mac --config.mac.identity=null",
-    "test:backend": "cd build/backend && ./start-backend"
+    "electron:build:win": "npm run build:backend && npm run build:frontend && electron-builder --win",
+    "electron:build:win:portable": "npm run build:backend && npm run build:frontend && electron-builder --win portable",
+    "test:backend": "cd build/backend && ./start-backend",
+    "test:backend:dev": "cd backend && python3 main.py"
   },
   "dependencies": {
     "@emotion/react": "^11.11.0",
@@ -59,19 +62,54 @@
       {
         "from": "build/backend",
         "to": "backend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+        "oneClick": false,
+        "allowToChangeInstallationDirectory": true,
+        "createDesktopShortcut": true,
+        "createStartMenuShortcut": true,
+        "shortcutName": "SeeDeep"
+      },
+    "portable": {
+      "artifactName": "SeeDeep-${version}-portable.exe"
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "identity": null,

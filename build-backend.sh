@@ -44,9 +44,9 @@ source build/backend/python-env/bin/activate
 echo "⬆️ Upgrading pip..."
 pip install --upgrade pip
 
-# Install dependencies
+# Install dependencies from backend directory
 echo "📦 Installing dependencies (this may take a few minutes)..."
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to install dependencies"
@@ -54,19 +54,19 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Copy application files
+# Copy application files from backend directory
 echo "📁 Copying application files..."
-cp -r app build/backend/
-cp main.py build/backend/
+cp -r backend/app build/backend/
+cp backend/main.py build/backend/
 
 # Copy alembic if exists
-if [ -f "alembic.ini" ]; then
-    cp alembic.ini build/backend/
+if [ -f "backend/alembic.ini" ]; then
+    cp backend/alembic.ini build/backend/
     echo "✅ alembic.ini copied"
 fi
 
-if [ -d "alembic" ]; then
-    cp -r alembic build/backend/
+if [ -d "backend/alembic" ]; then
+    cp -r backend/alembic build/backend/
     echo "✅ alembic/ directory copied"
 fi
 
@@ -91,17 +91,17 @@ echo "✅ Production .env created"
 echo "📦 Copying model weights..."
 mkdir -p build/backend/app/models/weights
 
-if [ -d "app/models/weights" ]; then
-    PT_COUNT=$(find app/models/weights -name "*.pt" -type f | wc -l)
+if [ -d "backend/app/models/weights" ]; then
+    PT_COUNT=$(find backend/app/models/weights -name "*.pt" -type f | wc -l)
 
     if [ $PT_COUNT -gt 0 ]; then
-        cp app/models/weights/*.pt build/backend/app/models/weights/ 2>/dev/null
+        cp backend/app/models/weights/*.pt build/backend/app/models/weights/ 2>/dev/null
         echo "✅ Copied $PT_COUNT model weight files"
     else
         echo "⚠️ No .pt model files found"
     fi
 else
-    echo "⚠️ app/models/weights/ directory not found"
+    echo "⚠️ backend/app/models/weights/ directory not found"
 fi
 
 # Clean up Python environment for macOS code signing
@@ -137,7 +137,7 @@ find build/backend/python-env/lib -name "__pycache__" -type d -exec rm -rf {} + 
 find build/backend/python-env/lib -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
 find build/backend/python-env/lib -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Create startup script for macOS with better error handling
+# Create startup script (unchanged - stays the same)
 echo "📝 Creating startup script..."
 cat > build/backend/start-backend << 'SCRIPT_EOF'
 #!/bin/bash

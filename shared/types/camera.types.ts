@@ -108,3 +108,22 @@ export interface ConnectionTestResult {
 	message: string;
 	latency?: number;
 }
+
+export type UrlTemplates = {
+	[key: string]: string;
+};
+
+export type CameraManufacturer = {
+	name: string;
+	defaultPort: string;
+	protocols: string[];
+	urlTemplates: UrlTemplates;
+	defaultUsername: string;
+	defaultPassword: string;
+	notes: string;
+	supportsDiscovery?: boolean;
+};
+
+export type CameraManufacturers = {
+	[key: string]: CameraManufacturer;
+};
